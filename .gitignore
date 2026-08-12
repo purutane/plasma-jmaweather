@@ -5,6 +5,9 @@ __pycache__/
 *.plasmoid
 *.zip
 
+# 全国分のテスト用フィクスチャ（必要なときに tools/fetch_fixtures.py --all で取る）
+tests/fixtures/all/
+
 # エディタ・OS
 .vscode/
 .idea/
