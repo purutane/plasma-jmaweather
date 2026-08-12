@@ -65,6 +65,14 @@ function loadAreas() {
     return instantiate(path.join(CODE_DIR, "Areas.js"));
 }
 
+function loadGeo() {
+    return instantiate(path.join(CODE_DIR, "Geo.js"));
+}
+
+function loadLocate() {
+    return instantiate(path.join(CODE_DIR, "Locate.js"));
+}
+
 // now を渡すと、その時刻に固定した状態の Forecast を返す（既定は実時刻）。
 function loadForecast(now) {
     return instantiate(path.join(CODE_DIR, "Forecast.js"), {
@@ -162,6 +170,8 @@ module.exports = {
     fixedDate,
     loadTelops,
     loadAreas,
+    loadGeo,
+    loadLocate,
     loadForecast,
     fixture,
     fixtureCodes,

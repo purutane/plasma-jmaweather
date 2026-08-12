@@ -13,13 +13,25 @@ import "../code/Areas.js" as Areas
 PlasmoidItem {
     id: root
 
-    readonly property string officeCode: Plasmoid.configuration.officeCode
-    readonly property string areaCode: Plasmoid.configuration.areaCode
+    readonly property bool autoLocation: Plasmoid.configuration.locationMode === 0
+    // 判定結果は設定に残してあるが、区域が再編されて消えていることもあるので実在を確かめる
+    readonly property bool usingDetected: autoLocation
+        && Areas.areaIndex(Plasmoid.configuration.detectedOfficeCode,
+                           Plasmoid.configuration.detectedAreaCode) >= 0
+
+    readonly property string officeCode: usingDetected
+        ? Plasmoid.configuration.detectedOfficeCode
+        : Plasmoid.configuration.officeCode
+    readonly property string areaCode: usingDetected
+        ? Plasmoid.configuration.detectedAreaCode
+        : Plasmoid.configuration.areaCode
     // 保存済みの名前ではなくコードから毎回組み立てる（選び直さなくても表記が揃う）
     readonly property string areaName: {
         var n = Areas.displayName(officeCode, areaCode);
         return n !== "" ? n : Plasmoid.configuration.areaName;
     }
+
+    property string locateError: ""
 
     property var parsed: null
     property string overview: ""
@@ -115,10 +127,70 @@ PlasmoidItem {
         });
     }
 
-    onOfficeCodeChanged: reload()
-    onAreaCodeChanged: reload()
+    // 予報区と地域は別々に届くので、片方だけ新しい状態で取りに行かないよう一拍待つ
+    Timer {
+        id: reloadDebounce
+        interval: 200
+        onTriggered: root.reload()
+    }
 
-    Component.onCompleted: reload()
+    onOfficeCodeChanged: reloadDebounce.restart()
+    onAreaCodeChanged: reloadDebounce.restart()
+
+    // ---- 現在地の自動判定 ----
+
+    LocationSource {
+        id: locator
+
+        onResolved: function (officeCode, areaCode) {
+            Plasmoid.configuration.detectedOfficeCode = officeCode;
+            Plasmoid.configuration.detectedAreaCode = areaCode;
+            Plasmoid.configuration.detectedAt = new Date().toISOString();
+            root.locateError = "";
+        }
+
+        onFailed: function (message) {
+            root.locateError = message;
+        }
+    }
+
+    // 予報は 30 分ごとに取りに行くが、現在地はそう動かないので 1 日 1 回で足りる。
+    // 外部サービスに毎回聞きに行かないための間引き。
+    function locationStale() {
+        var at = Date.parse(Plasmoid.configuration.detectedAt);
+        return isNaN(at) || Date.now() - at > 24 * 3600 * 1000;
+    }
+
+    // autoLocation の束縛は移行直後にまだ古い値を返すので、ここは設定を直接見る
+    function detectLocation(force) {
+        if (Plasmoid.configuration.locationMode !== 0) {
+            return;
+        }
+        if (force || locationStale()) {
+            locator.detect();
+        }
+    }
+
+    // 1.0 からの持ち越し。既に地域を選んでいた人を勝手に自動判定へ動かさない。
+    // 既定のまま使っていた人（＝東京地方）と新規の人だけが自動になる。
+    function migrateLocation() {
+        if (Plasmoid.configuration.locationMigrated) {
+            return;
+        }
+        if (Plasmoid.configuration.officeCode !== "130000"
+                || Plasmoid.configuration.areaCode !== "130010") {
+            Plasmoid.configuration.locationMode = 1;
+        }
+        Plasmoid.configuration.locationMigrated = true;
+    }
+
+    onAutoLocationChanged: detectLocation(false)
+
+    Component.onCompleted: {
+        migrateLocation();
+        detectLocation(false);
+        reload();
+    }
 
     Timer {
         interval: Math.max(5, Plasmoid.configuration.updateInterval) * 60000
@@ -138,6 +210,7 @@ PlasmoidItem {
             return Math.max(1000, next - now);
         }
         onTriggered: {
+            root.detectLocation(false);
             root.reload();
             interval = 24 * 3600 * 1000;
             repeat = true;
@@ -263,6 +336,16 @@ PlasmoidItem {
                             : ""
                         font: Kirigami.Theme.smallFont
                         opacity: 0.7
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    // 自動判定に失敗すると設定の地域が出る。黙って別の土地を出さない。
+                    PlasmaComponents.Label {
+                        visible: root.autoLocation && !root.usingDetected && root.locateError !== ""
+                        text: root.locateError + "（設定の地域を表示中）"
+                        font: Kirigami.Theme.smallFont
+                        color: Kirigami.Theme.neutralTextColor
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -523,6 +606,12 @@ PlasmoidItem {
             text: "今すぐ更新"
             icon.name: "view-refresh"
             onTriggered: root.reload()
+        },
+        PlasmaCore.Action {
+            text: "現在地を判定し直す"
+            icon.name: "mark-location"
+            visible: root.autoLocation
+            onTriggered: root.detectLocation(true)
         }
     ]
 }

@@ -20,7 +20,21 @@ const ENTRIES = [...XML.matchAll(/<entry name="(\w+)" type="(\w+)"/g)].map((m) =
     name: m[1],
     type: m[2]
 }));
-const CHOICES = [...XML.matchAll(/<choice name="(\w+)"\/>/g)].map((m) => m[1]);
+// <choice> は Enum ごとに分けて読む（全部まとめて数えると Enum を足した途端にずれる）
+function choicesOf(name) {
+    const block = XML.match(new RegExp(`<entry name="${name}"[^]*?</entry>`));
+    if (!block) {
+        return [];
+    }
+    return [...block[0].matchAll(/<choice name="(\w+)"\/>/g)].map((m) => m[1]);
+}
+
+function defaultOf(name) {
+    const m = XML.match(new RegExp(`name="${name}"[^]*?<default>([^<]*)</default>`));
+    return m ? m[1] : null;
+}
+
+const CHOICES = choicesOf("panelContent");
 
 test("設定項目が main.xml と設定画面で揃っている", () => {
     ok(ENTRIES.length > 0, "main.xml から設定項目を読めない");
@@ -90,13 +104,78 @@ test("パネル表示の選択肢が定義と設定画面と実装で揃って�
 });
 
 test("既定値が選択肢の範囲に収まる", () => {
-    const def = XML.match(/name="panelContent"[^]*?<default>(\d+)<\/default>/);
-    ok(def, "panelContent の既定値を読めない");
-    const value = parseInt(def[1], 10);
-    ok(
-        value >= 0 && value < CHOICES.length,
-        `既定値 ${value} が選択肢の範囲外 (0..${CHOICES.length - 1})`
+    for (const name of ["panelContent", "locationMode"]) {
+        const choices = choicesOf(name);
+        ok(choices.length > 0, `${name} の選択肢を読めない`);
+        const def = defaultOf(name);
+        ok(def !== null, `${name} の既定値を読めない`);
+        const value = parseInt(def, 10);
+        ok(
+            value >= 0 && value < choices.length,
+            `${name} の既定値 ${value} が選択肢の範囲外 (0..${choices.length - 1})`
+        );
+    }
+});
+
+test("地域の決め方が定義と設定画面と実装で揃っている", () => {
+    const choices = choicesOf("locationMode");
+    // 0 番＝自動、1 番＝手動。この並びを前提に main.qml と設定画面が数値で分岐している
+    eq(choices.length, 2, `locationMode の選択肢: ${choices.join(",")}`);
+    eq(choices[0], "Auto", "0 番が自動でないと既定が手動になる");
+
+    const combo = CONFIG_QML.match(
+        /Kirigami\.FormData\.label: "地域の決め方:"[^]*?model: \[([^\]]*)\]/
     );
+    ok(combo, "ConfigGeneral.qml の地域の決め方コンボを読めない");
+    const labels = combo[1].split(",").map((s) => s.trim()).filter(Boolean);
+    eq(labels.length, choices.length, "選択肢の件数が設定画面と合わない");
+
+    // 自動を 0 番として読んでいるか（ずれると手動指定が自動扱いになる）
+    ok(
+        /Plasmoid\.configuration\.locationMode === 0/.test(MAIN_QML),
+        "main.qml が locationMode の 0 番を自動として見ていない"
+    );
+    ok(
+        /cfg_locationMode === 0/.test(CONFIG_QML),
+        "ConfigGeneral.qml が locationMode の 0 番を自動として見ていない"
+    );
+    eq(defaultOf("locationMode"), "0", "既定は自動判定");
+});
+
+test("1.0 からの移行判定が既定値と同じ地域を見ている", () => {
+    // 「既定のまま使っていた人」だけを自動判定へ移す。main.xml の既定値を変えたら
+    // main.qml のここも変えないと、設定済みの人まで自動へ動いてしまう。
+    const body = MAIN_QML.match(/function migrateLocation\(\) \{([^]*?)\n    \}/);
+    ok(body, "main.qml の migrateLocation() を読めない");
+    for (const name of ["officeCode", "areaCode"]) {
+        const value = defaultOf(name);
+        ok(
+            body[1].includes(`"${value}"`),
+            `migrateLocation() が ${name} の既定値 ${value} を見ていない`
+        );
+    }
+    ok(
+        /locationMigrated/.test(body[1]),
+        "移行済みの印を付けないと毎回走ってしまう"
+    );
+});
+
+test("自動判定の結果は設定に保存して使い回す", () => {
+    // 外部サービスへ毎回問い合わせないための間引き。ここが消えると 30 分ごとに叩く
+    ok(
+        /function locationStale\(\)[^]*?detectedAt/.test(MAIN_QML),
+        "main.qml が detectedAt を見て判定の古さを測っていない"
+    );
+    ok(
+        /24 \* 3600 \* 1000/.test(MAIN_QML),
+        "再判定の間隔（1 日）が main.qml に無い"
+    );
+    for (const name of ["detectedOfficeCode", "detectedAreaCode", "detectedAt"]) {
+        ok(
+            new RegExp(`Plasmoid\\.configuration\\.${name} =`).test(MAIN_QML),
+            `${name} を書き戻していない`
+        );
+    }
 });
 
 test("更新間隔の下限が設定画面と実装で揃っている", () => {
@@ -132,8 +211,11 @@ test("metadata.json の体裁", () => {
 });
 
 test("QML ファイルに残骸が無い", () => {
-    for (const file of ["contents/ui/main.qml", "contents/ui/ConfigGeneral.qml"]) {
-        const src = read(...file.split("/"));
+    const dir = path.join(h.ROOT, "contents", "ui");
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".qml"));
+    ok(files.length > 0, "contents/ui/ に QML が無い");
+    for (const file of files) {
+        const src = read("contents", "ui", file);
         const bad = src.match(/console\.(log|debug)\(/g);
         if (bad) {
             fail(`${file}: デバッグ出力が ${bad.length} 件残っている`);

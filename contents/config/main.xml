@@ -5,6 +5,30 @@
                           http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
+        <entry name="locationMode" type="Enum">
+            <label>地域の決め方</label>
+            <choices>
+                <choice name="Auto"/>
+                <choice name="Manual"/>
+            </choices>
+            <default>0</default>
+        </entry>
+        <entry name="detectedOfficeCode" type="String">
+            <label>自動判定した府県予報区コード（判定前は空）</label>
+            <default></default>
+        </entry>
+        <entry name="detectedAreaCode" type="String">
+            <label>自動判定した一次細分区域コード（判定前は空）</label>
+            <default></default>
+        </entry>
+        <entry name="detectedAt" type="String">
+            <label>最後に自動判定した時刻（ISO 8601）</label>
+            <default></default>
+        </entry>
+        <entry name="locationMigrated" type="Bool">
+            <label>1.0 から持ち越した地域指定を手動へ寄せ終えたか（UI には出さない）</label>
+            <default>false</default>
+        </entry>
         <entry name="officeCode" type="String">
             <label>府県予報区コード</label>
             <default>130000</default>

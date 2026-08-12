@@ -53,6 +53,7 @@ async function main() {
 
     require("./cases/areas.test");
     require("./cases/telops.test");
+    require("./cases/locate.test");
     require("./cases/config.test");
     const forecast = require("./cases/forecast.test");
 

@@ -41,14 +41,17 @@ QML の構文・型エラーもここで出る（`qmllint` が無い環境では
 | --- | --- |
 | `contents/ui/main.qml` | 本体。パネル表示（compact）と展開表示（full）の両方 |
 | `contents/ui/ConfigGeneral.qml` | 設定画面 |
+| `contents/ui/LocationSource.qml` | 現在地判定の通信（main.qml と設定画面の両方から使う） |
 | `contents/config/main.xml` | 設定項目の定義（KConfigXT） |
 | `contents/code/Forecast.js` | 気象庁 JSON の解析。**難しいところは全部ここ** |
+| `contents/code/Locate.js` | 緯度経度から地域を引く。問い合わせ先の一覧もここ |
 | `contents/code/Areas.js` | 予報区・地域の一覧（**生成物**） |
 | `contents/code/Telops.js` | 天気コード表（**生成物**） |
-| `tools/generate_data.py` | 上の 2 つを気象庁のサイトから生成し直す |
+| `contents/code/Geo.js` | 市区町村の代表点（**生成物**） |
+| `tools/generate_data.py` | 上の 3 つを気象庁のサイトから生成し直す |
 | `tools/fetch_fixtures.py` | テスト用フィクスチャを取得する |
 
-`Areas.js` と `Telops.js` は手で編集しない。区域の再編や天気コードの追加があったときは
+`Areas.js`・`Telops.js`・`Geo.js` は手で編集しない。区域の再編や天気コードの追加があったときは
 `python3 tools/generate_data.py` を流し、差分を確認してからコミットする。
 件数が変わると README の「58 予報区 / 142 地域」「118 コード」と食い違ってテストが落ちるので、
 README も併せて直す。
@@ -65,6 +68,25 @@ README も併せて直す。
 とくに `WEEK_STATION` の表が要。「どの地域がどの週間区域に寄るか」を名指しで押さえてあり、
 `resolveWeekIndex()` を並び順で寄せる素直な実装に書き換えると、根室・浜通り・伊豆諸島南部・
 大隅・種子島屋久島がここで落ちる。この 5 箇所は他のテストをすり抜けるので、表を薄くしない。
+
+## 現在地の自動判定
+
+既定は自動判定で、外れたときのために手動指定を残してある（`locationMode`）。ここだけ
+`jma.go.jp` の外（`get.geojs.io` / `ipwho.is`）と通信するので、**判定は 1 日 1 回に間引いてある。**
+予報の更新間隔（既定 30 分）に釣られて叩きに行かせないこと。`tests/cases/config.test.js` が
+`detectedAt` を見ているかを検査している。
+
+座標から区域を引くのは近似で、`Geo.js` の代表点への最近傍で決めている。踏みやすいのは 2 つ。
+
+- **100km の蓋（`Locate.js` の `MAX_KM`）を外さない。** 蓋が無いとソウルから対馬、台北から
+  与那国島を拾って、国外の人に日本の予報を出す
+- **飛び地を持つ市区町村は矩形の中心が海に落ちる。** 小笠原村（南鳥島・沖ノ鳥島を含み対角
+  2000km）と久米島町は補正しないとその地域の人を一切判定できない。補正は
+  `tools/generate_data.py` の `ISLAND_POINTS`。新しい飛び地が出てきたら生成時に落ちる
+
+1.0 から更新した人を勝手に自動判定へ動かさないよう、`migrateLocation()` が既定値と違う地域を
+選んでいた設定を手動へ寄せている。`main.xml` の既定地域を変えるならここも変える
+（食い違いは `config.test.js` が検出する）。
 
 ## 機能追加の進め方
 
