@@ -1,0 +1,108 @@
+# CLAUDE.md
+
+気象庁の予報を表示する KDE Plasma 6 ウィジェット。QML + 素の JavaScript のみで、
+外部ライブラリも API キーも使わない。この方針は変えない。
+
+## 変更を反映させる
+
+**作業ツリーを編集しただけではパネルの表示は変わらない。** インストール先
+（`~/.local/share/plasma/plasmoids/io.github.purutane.jmaweather/`）は実体のコピーなので、
+入れ直すまで古いコードが動き続ける。「直した」と報告する前に必ず反映させること。
+
+```sh
+kpackagetool6 --type Plasma/Applet --upgrade .
+kquitapp6 plasmashell && kstart plasmashell   # QML の変更はこれを挟まないと載らない
+```
+
+パネルに出さずに見た目を確認するだけなら、入れ直したあとに次で足りる。
+
+```sh
+plasmawindowed io.github.purutane.jmaweather
+```
+
+## 検証
+
+```sh
+node tests/run.js          # qmllint + テスト一式（依存なし、数秒）
+node tests/run.js --all    # 全 56 配信分のフィクスチャでも回す（要 fetch_fixtures.py --all）
+node tests/run.js 受け皿    # 名前で絞り込み
+```
+
+`node tests/run.js` が唯一の自動チェック。`tests/run.js` は先に `qmllint` を回すので、
+QML の構文・型エラーもここで出る（`qmllint` が無い環境では自動で飛ばす）。
+コードを触ったら必ず通すこと。時刻依存の挙動があるため `TZ=Asia/Tokyo` に固定して走る。
+
+パネル上の見た目・アイコンの実在・設定画面の操作感はテストで見ていないので、
+表示に関わる変更をしたときは上の手順で実際に動かして確認する。
+
+## 構成
+
+| パス | 中身 |
+| --- | --- |
+| `contents/ui/main.qml` | 本体。パネル表示（compact）と展開表示（full）の両方 |
+| `contents/ui/ConfigGeneral.qml` | 設定画面 |
+| `contents/config/main.xml` | 設定項目の定義（KConfigXT） |
+| `contents/code/Forecast.js` | 気象庁 JSON の解析。**難しいところは全部ここ** |
+| `contents/code/Areas.js` | 予報区・地域の一覧（**生成物**） |
+| `contents/code/Telops.js` | 天気コード表（**生成物**） |
+| `tools/generate_data.py` | 上の 2 つを気象庁のサイトから生成し直す |
+| `tools/fetch_fixtures.py` | テスト用フィクスチャを取得する |
+
+`Areas.js` と `Telops.js` は手で編集しない。区域の再編や天気コードの追加があったときは
+`python3 tools/generate_data.py` を流し、差分を確認してからコミットする。
+件数が変わると README の「58 予報区 / 142 地域」「118 コード」と食い違ってテストが落ちるので、
+README も併せて直す。
+
+## 気象庁データの落とし穴
+
+`README.md` の「実装メモ」に、受け皿の寄せ方・気温が観測所単位である件・配信コードの例外
+（十勝と奄美）・夕方以降に今日の気温が消える件をまとめてある。**`Forecast.js` を触る前に必ず読む。**
+どれも全国の実データで確認して決めた挙動で、素直に書き直すと特定の地域だけ壊れる。
+
+`tests/cases/forecast.test.js` がその内容をテストとして固定している。ここが落ちたときは、
+テストの期待値ではなく実装かデータのどちらかがおかしいと考えること。
+
+とくに `WEEK_STATION` の表が要。「どの地域がどの週間区域に寄るか」を名指しで押さえてあり、
+`resolveWeekIndex()` を並び順で寄せる素直な実装に書き換えると、根室・浜通り・伊豆諸島南部・
+大隅・種子島屋久島がここで落ちる。この 5 箇所は他のテストをすり抜けるので、表を薄くしない。
+
+## 設定項目を足すとき
+
+設定は 3 箇所に分かれていて、**揃っていなくても QML はエラーを出さずに黙って既定値を返す。**
+どれか 1 つを忘れると「設定しても効かない」「パネルが空になる」といった形で表に出る。
+
+1. `contents/config/main.xml` — `<entry>`（Enum なら `<choice>` の並び順がそのまま値になる）
+2. `contents/ui/ConfigGeneral.qml` — `cfg_<名前>` プロパティと入力欄
+3. `contents/ui/main.qml` — `Plasmoid.configuration.<名前>` の参照
+
+とくに `panelContent` は `<choice>` の並び順・コンボボックスの `model` 配列・`panelText()` の
+`mode === N` という 3 つの数値が暗黙に対応している。`tests/cases/config.test.js` がこの対応を
+見張っているが、ソースを正規表現で読んでいるだけなので、書き方を大きく変えると検出できなくなる。
+落ちたときは「設定がズレた」のか「書き方が変わった」のかを先に切り分けること。
+
+## フィクスチャ
+
+`tests/fixtures/*.json` は気象庁の実データ。引っかかりどころを踏む 5 予報区だけをコミットしている
+（`tools/fetch_fixtures.py` の `PINNED` に理由が書いてある）。
+
+予報の中身は 1 日 3 回変わるので、**テストの期待値に気温や天気そのものを書かない。**
+「JSON から導いた値と一致するか」「最高 ≧ 最低か」のように、取り直しても成立する形で書く。
+時刻に依存する挙動は `h.loadForecast("2026-08-12T20:00:00+09:00")` のように
+`Date` を固定して確かめる（製品コード側に時刻の注入口は作っていない。
+`tests/harness.js` が関数スコープで `Date` を覆っている）。
+
+全国分は重いのでコミットしない。受け皿の一意性など全国で確かめたいことがあるときだけ取る。
+
+```sh
+python3 tools/fetch_fixtures.py --all && node tests/run.js --all
+```
+
+## 書き方
+
+- コメント・UI 文字列・コミットメッセージはすべて日本語
+- コメントは「何をしているか」ではなく「なぜそうなっているか」を書く。
+  気象庁データの理不尽さに合わせている箇所が多く、それを知らないと消されてしまうため
+- 既存のコードは ES5 相当（`var`、`function`）で書かれている。QML の JS エンジンに合わせているので揃える。
+  `tests/` 配下は Node で動かすだけなので今風の書き方でよい
+- `console.log` を残さない（テストが落ちる）
+- 依存を増やさない。テストランナーも `tests/harness.js` に自前で持っている

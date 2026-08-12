@@ -43,16 +43,26 @@ kquitapp6 plasmashell && kstart plasmashell
 
 ### 開発時
 
-作業ツリーをそのままインストール先に見せると、編集がすぐ反映されて楽です。
-
-```sh
-ln -s "$PWD" ~/.local/share/plasma/plasmoids/io.github.purutane.jmaweather
-```
-
-単体で起動して確認できます。
+編集したあとは上の `--upgrade` で入れ直し、plasmashell を読み込み直すと反映されます。
+パネルに置かずに単体で起動して確認することもできます。
 
 ```sh
 plasmawindowed io.github.purutane.jmaweather
+```
+
+テストは Node だけで動きます。`qmllint` があれば併せて実行されます。
+
+```sh
+node tests/run.js
+```
+
+解析ロジックの検証には気象庁の実データを使っています。取り直すときや、全国 56 配信分で
+確かめたいときは次の通りです。
+
+```sh
+python3 tools/fetch_fixtures.py          # tests/fixtures/ を更新
+python3 tools/fetch_fixtures.py --all    # 全国分（コミット対象外）
+node tests/run.js --all
 ```
 
 ## 設定
@@ -80,6 +90,9 @@ plasmawindowed io.github.purutane.jmaweather
 これらは気象庁のウェブサイトが内部的に使っているもので、仕様が公表された API ではありません。
 予告なく形式が変わる可能性があります。利用にあたっては
 [気象庁ホームページについて](https://www.jma.go.jp/jma/kishou/info/coment.html) を確認してください。
+
+`contents/code/` の 2 ファイルと `tests/fixtures/` の JSON は、上記から取得した気象庁のデータを
+含みます（出典: 気象庁）。MIT ライセンスの対象は本ウィジェットのコードです。
 
 ## 実装メモ
 
