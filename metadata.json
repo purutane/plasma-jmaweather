@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "purutane"
+            }
+        ],
+        "Category": "Weather",
+        "Description": "気象庁の予報データをパネルに常駐表示します",
+        "Icon": "weather-clear",
+        "Id": "org.kde.jmaweather",
+        "License": "MIT",
+        "Name": "気象庁天気予報",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

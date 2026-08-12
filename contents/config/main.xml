@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+    <kcfgfile name=""/>
+    <group name="General">
+        <entry name="officeCode" type="String">
+            <label>府県予報区コード</label>
+            <default>130000</default>
+        </entry>
+        <entry name="areaCode" type="String">
+            <label>一次細分区域コード</label>
+            <default>130010</default>
+        </entry>
+        <entry name="areaName" type="String">
+            <label>表示用の地域名（コードから組み立てられない場合の控え）</label>
+            <default>東京都 - 東京地方</default>
+        </entry>
+        <entry name="updateInterval" type="Int">
+            <label>更新間隔（分）</label>
+            <default>30</default>
+        </entry>
+        <entry name="panelContent" type="Enum">
+            <label>パネルに出す内容</label>
+            <choices>
+                <choice name="IconOnly"/>
+                <choice name="Temperature"/>
+                <choice name="Precipitation"/>
+                <choice name="TemperatureAndPrecipitation"/>
+            </choices>
+            <default>1</default>
+        </entry>
+        <entry name="showAreaNameInPanel" type="Bool">
+            <label>パネルに地域名も出す</label>
+            <default>false</default>
+        </entry>
+    </group>
+</kcfg>

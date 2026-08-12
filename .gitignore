@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+
+# ビルド・配布物
+*.plasmoid
+*.zip
+
+# エディタ・OS
+.vscode/
+.idea/
+*~
+*.swp
+.DS_Store
