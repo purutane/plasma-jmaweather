@@ -88,6 +88,17 @@ function areaIndex(officeCode, areaCode) {
     return -1;
 }
 
+// 地域コードは全国で一意なので、そこから予報区を引き直せる（Geo.js の逆引き用）
+function officeOf(areaCode) {
+    for (var i = 0; i < OFFICES.length; i++) {
+        var as = OFFICES[i].areas;
+        for (var j = 0; j < as.length; j++) {
+            if (as[j].code === areaCode) return OFFICES[i].code;
+        }
+    }
+    return "";
+}
+
 // 「北西部」「南部」だけではどこの話か分からないので予報区名を冠して返す。
 // 予報区名と地域名が同じものが 7 件あるので、その場合は重ねない。
 function displayName(officeCode, areaCode) {
