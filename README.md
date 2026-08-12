@@ -30,7 +30,7 @@ kpackagetool6 --type Plasma/Applet --install .
 更新するときは `--upgrade .` に変えて同じコマンドを実行します。削除は次の通りです。
 
 ```sh
-kpackagetool6 --type Plasma/Applet --remove org.kde.jmaweather
+kpackagetool6 --type Plasma/Applet --remove io.github.purutane.jmaweather
 ```
 
 インストール後、ウィジェット一覧に出てこない場合は plasmashell を読み込み直してください。
@@ -46,13 +46,13 @@ kquitapp6 plasmashell && kstart plasmashell
 作業ツリーをそのままインストール先に見せると、編集がすぐ反映されて楽です。
 
 ```sh
-ln -s "$PWD" ~/.local/share/plasma/plasmoids/org.kde.jmaweather
+ln -s "$PWD" ~/.local/share/plasma/plasmoids/io.github.purutane.jmaweather
 ```
 
 単体で起動して確認できます。
 
 ```sh
-plasmawindowed org.kde.jmaweather
+plasmawindowed io.github.purutane.jmaweather
 ```
 
 ## 設定
