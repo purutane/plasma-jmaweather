@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""contents/code/ の Areas.js・Telops.js・Geo.js を気象庁のサイトから生成し直す。
+"""contents/code/ の Areas.js・Telops.js・Geo.js・WarnCodes.js を気象庁のサイトから生成し直す。
 
 いずれも気象庁が配信しているものをそのまま写しただけの表なので、
 区域の再編や天気コードの追加があったときはこのスクリプトを流す。
@@ -7,9 +7,10 @@
     python3 tools/generate_data.py
 
 生成物:
-    contents/code/Areas.js   予報区と一次細分区域の一覧（common/const/area.json より）
-    contents/code/Telops.js  天気コード表（予報ページ内の TELOPS より）
-    contents/code/Geo.js     市区町村の代表点（common/const/class20relm.json より）
+    contents/code/Areas.js      予報区と一次細分区域の一覧（common/const/area.json より）
+    contents/code/Telops.js     天気コード表（予報ページ内の TELOPS より）
+    contents/code/Geo.js        市区町村の代表点（common/const/class20relm.json より）
+    contents/code/WarnCodes.js  警報・注意報コード表（警報ページ内の定義より）
 """
 
 import json
@@ -24,6 +25,9 @@ AREA_URL = "https://www.jma.go.jp/bosai/common/const/area.json"
 # 区域の境界そのものは配信されていないので、緯度経度からの逆引きはこれを代表点にする。
 RELM_URL = "https://www.jma.go.jp/bosai/common/const/class20relm.json"
 FORECAST_PAGE = "https://www.jma.go.jp/bosai/forecast/"
+# 警報・注意報コードの表は const 配下に配信されていない。警報ページのインライン
+# スクリプトが唯一の出どころなので、そこから写す。
+WARNING_PAGE = "https://www.jma.go.jp/bosai/warning/"
 UA = {"User-Agent": "plasma-jmaweather-datagen/1.0"}
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -157,6 +161,156 @@ def write_telops(telops):
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return path, len(telops)
+
+
+# 警報ページの表は `"03":{shortNameParts:s.rain[3],nameParts:e.rain[3],elem:"rain",level:30}`
+# のような並びで、名前そのものは別の表に要素別・レベル別で入っている。
+WARN_ENTRY_RE = re.compile(
+    r'"?(\d{2})"?:\{shortNameParts:\w+\.\w+\[\d\],'
+    r"nameParts:\w+\.(\w+)\[(\d)\],"
+    r'elem:"\w+",level:(\d+)\}'
+)
+
+# 表に無いコードをどう扱うかは Warning.js 側の判断だが、生成時に気付けるよう
+# 気象庁が現に配信しているコードはここで数えておく。
+WARN_MIN_CODES = 30
+
+# 警報ページの表に無いが、防災情報XMLの警報・注意報コード表にはあるもの。
+# 警報ページは洪水を「氾濫」と呼び替えて別の配信（bosai/flood/）から描いているため、
+# ページ内の表からは洪水が丸ごと抜けている。warning.json 側にこれらが出てくるか
+# どうかは実データで確かめられていない（取得時は全国どこにも出ていなかった）ので、
+# 出てきたときにコード番号が生で表示されないよう名前だけ用意しておく。
+# ページ側に同じコードが載ったらこちらは消す（生成時に衝突で止まる）。
+WARN_EXTRA = {
+    "04": ("洪水警報", 30),
+    "18": ("洪水注意報", 20),
+    "27": ("その他の注意報", 20),
+}
+
+
+def brace_span(text, open_index):
+    """text[open_index] の `{` に対応する `}` の次の位置を返す。"""
+    depth = 0
+    for i in range(open_index, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    raise RuntimeError("対応する } が見つからない")
+
+
+def extract_warn_names(page):
+    """要素別・レベル別の名称表（nameParts）を切り出す。
+
+    同じ形の表が短縮版（「注」「警」）と正式版（「大雨注意報」）の 2 つあるので、
+    レベル3の大雨が「大雨」を含む方＝正式版を選ぶ。
+    """
+    for m in re.finditer(re.escape("rain:[[]"), page):
+        start = page.rindex("{", 0, m.start())
+        raw = page[start:brace_span(page, start)]
+        if "\\u" in raw:
+            raw = raw.encode().decode("unicode_escape")
+        raw = re.sub(r"([{,])(\w+):", r'\1"\2":', raw)  # 裸のキーを引用符で囲む
+        try:
+            table = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if "大雨" in "".join(table.get("rain", [[]] * 4)[3]):
+            return table
+    raise RuntimeError("警報・注意報の名称表が見つからない")
+
+
+def extract_warn_codes(page):
+    """警報ページのインラインスクリプトから警報・注意報コードの表を切り出す。
+
+    同じ形の表が指定河川洪水予報にもあり、そちらは 20・21・22 のように
+    警報コードと同じ数値を別の意味で使っている。要素が 1 種類（flood）しか
+    出てこないのが河川側なので、要素が複数ある方を警報・注意報の表とみなす。
+    """
+    names = extract_warn_names(page)
+
+    runs, current = [], []
+    prev_end = -2
+    for m in WARN_ENTRY_RE.finditer(page):
+        if m.start() != prev_end + 1:  # 直前の項目と `,` 一つで繋がっていなければ別の表
+            current = []
+            runs.append(current)
+        current.append(m)
+        prev_end = m.end()
+
+    tables = [r for r in runs if len({m.group(2) for m in r}) > 1]
+    if len(tables) != 1:
+        raise RuntimeError(f"警報・注意報コードの表を一つに絞れない（候補 {len(tables)} 件）")
+
+    codes = {}
+    for m in tables[0]:
+        code, elem, index, level = m.group(1), m.group(2), int(m.group(3)), int(m.group(4))
+        parts = names.get(elem, [])
+        if index >= len(parts) or not parts[index]:
+            raise RuntimeError(f"コード {code} の名称が名称表に無い（{elem}[{index}]）")
+        # 「レベル３」は危険度レベルの見出しで、警報の名前ではないので落とす
+        name = "".join(p for p in parts[index] if not p.startswith("レベル"))
+        if not name:
+            raise RuntimeError(f"コード {code} の名称が空（{elem}[{index}]）")
+        codes[code] = (name, level)
+
+    overlap = set(codes) & set(WARN_EXTRA)
+    if overlap:
+        raise RuntimeError(
+            f"WARN_EXTRA のコードがページ側にも載りました。手当てを消してください: {sorted(overlap)}"
+        )
+    codes.update(WARN_EXTRA)
+
+    if len(codes) < WARN_MIN_CODES:
+        raise RuntimeError(f"警報・注意報コードが {len(codes)} 件しか取れない")
+    return codes
+
+
+def write_warn_codes(codes):
+    lines = [
+        ".pragma library",
+        "",
+        "// 気象庁 警報・注意報コード表（www.jma.go.jp/bosai/warning/ のページ内定義より生成）",
+        "// tools/generate_data.py が書き出すので手で編集しない",
+        "// code -> [名称, レベル]",
+        "var CODES = {",
+    ]
+    for code in sorted(codes):
+        name, level = codes[code]
+        lines.append(f'    "{code}": ["{name}", {level}],')
+    lines[-1] = lines[-1].rstrip(",")
+    lines += [
+        "};",
+        "",
+        "// 気象庁のページが使っている重み。数値の大小がそのまま深刻さの順になる。",
+        "var ADVISORY = 20;   // 注意報",
+        "var WARNING = 30;    // 警報",
+        "var CRITICAL = 40;   // 危険警報",
+        "var EMERGENCY = 50;  // 特別警報",
+        "",
+        "// 表に無いコードは新設された警報とみなして警報扱いにする。",
+        "// 名前が分からないものを黙って捨てると、コードが増えた日に特別警報を",
+        "// 出し損ねる。出しすぎる方に倒しておき、コード番号をそのまま見せる。",
+        "function name(code) {",
+        "    var e = CODES[String(code)];",
+        '    return e ? e[0] : "警報・注意報（コード " + code + "）";',
+        "}",
+        "",
+        "function level(code) {",
+        "    var e = CODES[String(code)];",
+        "    return e ? e[1] : WARNING;",
+        "}",
+        "",
+        "function known(code) {",
+        "    return !!CODES[String(code)];",
+        "}",
+    ]
+    path = os.path.join(OUT_DIR, "WarnCodes.js")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path, len(codes)
 
 
 def write_areas(area):
@@ -313,6 +467,7 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     try:
         telops = extract_telops(get(FORECAST_PAGE, as_json=False))
+        warn_codes = extract_warn_codes(get(WARNING_PAGE, as_json=False))
         area = get(AREA_URL)
         relm = get(RELM_URL)
     except Exception as e:
@@ -321,6 +476,8 @@ def main():
 
     path, n = write_telops(telops)
     print(f"{os.path.relpath(path, ROOT)}: 天気コード {n} 件")
+    path, n = write_warn_codes(warn_codes)
+    print(f"{os.path.relpath(path, ROOT)}: 警報・注意報コード {n} 件")
     path, offices, areas = write_areas(area)
     print(f"{os.path.relpath(path, ROOT)}: 予報区 {offices} / 地域 {areas}")
     path, towns, covered = write_geo(area, relm)
