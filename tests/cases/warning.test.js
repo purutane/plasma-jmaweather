@@ -13,18 +13,23 @@ const W = h.loadWarning();
 const C = h.loadWarnCodes();
 const areas = h.loadAreas();
 
-// 気象庁の実データそのままの形。status と code の組み合わせを手で作る。
-function area(code, warnings) {
-    return { code: code, warnings: warnings };
+// 気象庁の実データそのままの形。1 通の電文（大雨・土砂災害…）に相当する。
+function telegram(areaList, opts) {
+    const o = opts || {};
+    return {
+        reportDatetime: o.at || "2026-08-13T10:00:00+09:00",
+        headlineText: o.headline || "見出しの文",
+        warning: { class10Items: areaList, class20Items: [] }
+    };
 }
 
-function doc(areaList, extra) {
-    const json = {
-        reportDatetime: "2026-08-13T10:00:00+09:00",
-        headlineText: "見出しの文",
-        areaTypes: [{ areas: areaList }, { areas: [] }]
-    };
-    return Object.assign(json, extra || {});
+function area(code, kinds) {
+    return { areaCode: code, kinds: kinds };
+}
+
+// 電文は配列で届く。1 通だけの入力を作る近道。
+function doc(areaList, opts) {
+    return [telegram(areaList, opts)];
 }
 
 // ---- コード表 ----
@@ -136,10 +141,55 @@ test("レベルの呼び名", () => {
     eq(W.levelLabel(C.ADVISORY), "注意報");
 });
 
-test("見出しと発表時刻を拾う", () => {
-    const parsed = W.parse(doc([area("130010", [])]), "130010");
-    eq(parsed.headline, "見出しの文", "headlineText");
-    eq(parsed.reportTime, "2026-08-13T10:00:00+09:00", "reportDatetime");
+test("見出しは一番重い電文のものを使う", () => {
+    // 大雨・土砂災害・雷はそれぞれ別の電文で届き、電文ごとに違う見出しが付く。
+    // 全部並べると同じ話が何度も出るので、一番重いものを伝えている文だけ出す。
+    const json = [
+        telegram([area("120010", [{ code: "14", status: "発表" }])], {
+            headline: "雷の見出し",
+            at: "2026-08-13T18:00:00+09:00"
+        }),
+        telegram([area("120010", [{ code: "33", status: "継続" }])], {
+            headline: "大雨特別警報の見出し",
+            at: "2026-08-13T21:20:00+09:00"
+        })
+    ];
+    const parsed = W.parse(json, "120010");
+    eq(parsed.headline, "大雨特別警報の見出し", "headlineText");
+    // 発表時刻は電文ごとに違う。表に出すのは一番新しいもの。
+    eq(parsed.reportTime, "2026-08-13T21:20:00+09:00", "reportDatetime");
+});
+
+test("複数の電文に散った警報をまとめる", () => {
+    const json = [
+        telegram([
+            area("120010", [{ code: "33", status: "継続" }]),
+            area("120020", [{ code: "43", status: "継続" }])
+        ]),
+        telegram([area("120010", [{ code: "49", status: "継続" }])]),
+        telegram([area("120010", [{ code: "14", status: "発表" }])])
+    ];
+    const parsed = W.parse(json, "120010");
+    eq(W.summary(parsed), "大雨特別警報・土砂災害危険警報・雷注意報", "まとめ");
+    eq(parsed.maxLevel, C.EMERGENCY, "maxLevel");
+    // 他の地域の分を拾っていないか
+    eq(W.summary(W.parse(json, "120020")), "大雨危険警報", "別区域");
+});
+
+test("格下げの遷移は発表中として残す", () => {
+    // 「警報から注意報」は解除ではなく格下げ。code は今の状態を指している。
+    const json = doc([
+        area("110010", [
+            { code: "29", status: "警報から注意報" },
+            { code: "03", status: "危険警報から警報" },
+            { code: "10", status: "危険警報から注意報" }
+        ])
+    ]);
+    const parsed = W.parse(json, "110010");
+    eq(parsed.items.length, 3, "件数");
+    eq(parsed.maxLevel, C.WARNING, "格下げ後のレベルで見る");
+    eq(W.warningNames(parsed), "大雨警報", "警報以上");
+    eq(W.advisoryNames(parsed), "大雨注意報・土砂災害注意報", "注意報");
 });
 
 // ---- 壊れた入力で落ちない ----
@@ -152,7 +202,7 @@ test("知らない区域コードは空で返す", () => {
 });
 
 test("空の入力で落ちない", () => {
-    for (const json of [null, {}, { areaTypes: [] }, { areaTypes: [{}] }]) {
+    for (const json of [null, [], [{}], [{ warning: {} }], [null]]) {
         const parsed = W.parse(json, "130010");
         eq(parsed.items.length, 0, "件数");
         eq(parsed.maxLevel, 0, "maxLevel");
@@ -194,15 +244,16 @@ function register(dir, suffix) {
         const unknown = new Set();
         let total = 0;
         for (const { json } of targets(dir)) {
-            for (const at of json.areaTypes) {
-                for (const a of at.areas || []) {
-                    for (const w of a.warnings || []) {
-                        if (!w.code) {
+            for (const entry of json) {
+                const w = entry.warning || {};
+                for (const item of [...(w.class10Items || []), ...(w.class20Items || [])]) {
+                    for (const kind of item.kinds || []) {
+                        if (!kind.code) {
                             continue;
                         }
                         total++;
-                        if (!C.known(w.code)) {
-                            unknown.add(w.code);
+                        if (!C.known(kind.code)) {
+                            unknown.add(kind.code);
                         }
                     }
                 }
@@ -248,8 +299,14 @@ test("main.qml が警報の取得で予報区コードを読み替えていな�
     );
     ok(/officeCode/.test(body[1]), "warningUrl() が予報区コードを使っていない");
     ok(
-        /bosai\/warning\/data\/warning\//.test(body[1]),
-        "warningUrl() が警報の配信先を指していない"
+        /bosai\/warning\/data\/r8\//.test(body[1]),
+        "warningUrl() が現行の配信先 (data/r8/) を指していない"
+    );
+    // 同名の JSON が data/warning/ にもあるが 2026-05-28 で更新が止まっている。
+    // そちらへ戻すと、特別警報が出ていてもウィジェットは静かなままになる。
+    ok(
+        !/data\/warning\//.test(body[1]),
+        "warningUrl() が更新の止まった data/warning/ を指している"
     );
 });
 

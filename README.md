@@ -95,7 +95,7 @@ node tests/run.js --all
 
 - 府県天気予報: `https://www.jma.go.jp/bosai/forecast/data/forecast/{予報区コード}.json`
 - 府県概況: `https://www.jma.go.jp/bosai/forecast/data/overview_forecast/{予報区コード}.json`
-- 気象警報・注意報: `https://www.jma.go.jp/bosai/warning/data/warning/{予報区コード}.json`
+- 気象警報・注意報: `https://www.jma.go.jp/bosai/warning/data/r8/{予報区コード}.json`
 - 予報区一覧: `https://www.jma.go.jp/bosai/common/const/area.json`
 - 市区町村の外接矩形: `https://www.jma.go.jp/bosai/common/const/class20relm.json`（現在地の逆引き用）
 
@@ -139,9 +139,15 @@ node tests/run.js --all
   その地域は入っていないため、予報と同じ感覚で `Areas.endpoint()` を通すと、この 2 地域だけ警報が
   永久に出なくなります。区域コードは `areaTypes[0]` が一次細分区域そのもので、全 58 予報区 142 地域が
   対応する予報区の JSON に含まれることを確認済みです
+- **警報の配信先は `data/r8/`** — 同じ名前の JSON が `data/warning/` にもありますが、2026年5月28日で
+  更新が止まっています（気象庁のページも `r8` を読んでいます）。古い方を見ていると、大雨特別警報が
+  出ていてもウィジェットは静かなままになります。`r8` は電文ごとの配列で、大雨・土砂災害・雷などが
+  別々の要素として届くため、同じ地域の分を全部混ぜてからまとめます
 - **解除された警報も同じ配列に残る** — `status` が「解除」のものが混ざり、実データでは発表中より
   多いことすらあります。落とさずに並べると解除済みばかりが表示されます。コードを持たない
-  「発表警報・注意報はなし」も同じ配列に来るので、これも目印として落とします
+  「発表警報・注意報はなし」も同じ配列に来るので、これも目印として落とします。一方
+  「警報から注意報」「危険警報から警報」は格下げされただけで発表中なので残します（コードが
+  今の状態を指しています）
 - **警報コードの表は配信されていない** — 天気コードと違って `const` 配下に無く、警報ページの
   インラインスクリプトが唯一の出どころです（警報・注意報の 36 コード）。そのページは洪水を「氾濫」と
   呼び替えて別配信から描いているため表から洪水が抜けており、`tools/generate_data.py` の `WARN_EXTRA` で

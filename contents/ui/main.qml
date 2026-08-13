@@ -100,8 +100,11 @@ PlasmoidItem {
     // 警報は予報と逆で、読み替えてはいけない。十勝 (014030) と奄美 (460040) は
     // 警報だと自分のコードで配信されていて、読み替え先（014100 / 460100）の
     // JSON にはその地域が入っていない。Areas.endpoint() を挟むと警報が出なくなる。
+    //
+    // data/r8/ が現行の配信。data/warning/ にも同名の JSON があるが更新が
+    // 止まっているので、そちらを見ると特別警報が出ていても静かなままになる。
     function warningUrl() {
-        return "https://www.jma.go.jp/bosai/warning/data/warning/"
+        return "https://www.jma.go.jp/bosai/warning/data/r8/"
              + officeCode + ".json";
     }
 

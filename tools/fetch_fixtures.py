@@ -23,7 +23,8 @@ import time
 import urllib.request
 
 FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/{}.json"
-WARNING_URL = "https://www.jma.go.jp/bosai/warning/data/warning/{}.json"
+# data/warning/ にも同名の JSON があるが更新が止まっている。現行は data/r8/。
+WARNING_URL = "https://www.jma.go.jp/bosai/warning/data/r8/{}.json"
 UA = {"User-Agent": "plasma-jmaweather-fixtures/1.0"}
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,6 +46,7 @@ PINNED = {
 WARNING_PINNED = {
     "014030": "十勝地方（予報では 014100 へ読み替える予報区。警報は読み替えない）",
     "014100": "釧路・根室地方（014030 を含まないことの控え）",
+    "120000": "千葉県（大雨・土砂災害・雷が別々の電文で同じ地域に散る）",
     "130000": "東京都（発表中と解除が混ざる）",
     "460040": "奄美地方（予報では 460100 へ読み替える予報区）",
 }
