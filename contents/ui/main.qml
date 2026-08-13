@@ -314,6 +314,10 @@ PlasmoidItem {
 
         collapseMarginsHint: true
 
+        // collapseMarginsHint で popup の余白を潰しているので、そのままだと本文が縁に貼り付く。
+        // ヘッダー（地名と発表時刻）は帯の中にあって窮屈に見えないので、余白は本文だけに入れる。
+        readonly property real contentMargin: Kirigami.Units.largeSpacing * 2
+
         header: PlasmaExtras.PlasmoidHeading {
             RowLayout {
                 anchors.fill: parent
@@ -388,6 +392,8 @@ PlasmoidItem {
             PlasmaComponents.ScrollView {
                 id: scroll
                 anchors.fill: parent
+                anchors.leftMargin: full.contentMargin
+                anchors.rightMargin: full.contentMargin
                 visible: root.hasData
                 contentWidth: availableWidth
 
