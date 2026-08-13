@@ -312,11 +312,15 @@ PlasmoidItem {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 26
         Layout.preferredHeight: Kirigami.Units.gridUnit * 30
 
-        collapseMarginsHint: true
-
         header: PlasmaExtras.PlasmoidHeading {
-            RowLayout {
-                anchors.fill: parent
+            // PlasmoidHeading は左右の余白を持たないので自分で足す。右はツールボタンが
+            // 自前の余白を持っているぶん狭くしないと右だけ広く見える。
+            leftPadding: Kirigami.Units.largeSpacing
+            rightPadding: Kirigami.Units.smallSpacing
+
+            // contentItem に入れる（子として置くと高さが背景の 40px 固定になり、
+            // 判定失敗の行が出たときにヘッダーからはみ出す）
+            contentItem: RowLayout {
                 spacing: Kirigami.Units.smallSpacing
 
                 ColumnLayout {
@@ -391,14 +395,17 @@ PlasmoidItem {
                 visible: root.hasData
                 contentWidth: availableWidth
 
+                // 左右の余白は中身をずらして作る。ScrollView 側にマージンを付けると
+                // スクロールバーまで内側に寄ってポップアップの縁から浮く。
                 ColumnLayout {
-                        width: scroll.availableWidth
-                        spacing: Kirigami.Units.largeSpacing
+                    x: Kirigami.Units.largeSpacing
+                    width: scroll.availableWidth - Kirigami.Units.largeSpacing * 2
+                    spacing: Kirigami.Units.largeSpacing
 
                     // ---- 今日 ----
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        Layout.topMargin: Kirigami.Units.largeSpacing
                         spacing: Kirigami.Units.largeSpacing
 
                         Kirigami.Icon {
@@ -576,7 +583,6 @@ PlasmoidItem {
                     // ---- 概況 ----
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.bottomMargin: Kirigami.Units.smallSpacing
                         spacing: Kirigami.Units.smallSpacing
                         visible: root.overview !== ""
 
@@ -595,6 +601,12 @@ PlasmoidItem {
                             opacity: 0.9
                             Layout.fillWidth: true
                         }
+                    }
+
+                    // 末尾の余白。概況が空でも下端に文字が張り付かないよう独立させてある
+                    Item {
+                        Layout.fillWidth: true
+                        implicitHeight: Kirigami.Units.largeSpacing
                     }
                 }
             }
