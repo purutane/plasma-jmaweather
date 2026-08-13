@@ -59,5 +59,9 @@
             <label>パネルに地域名も出す</label>
             <default>false</default>
         </entry>
+        <entry name="showWarnings" type="Bool">
+            <label>警報・注意報を表示する</label>
+            <default>true</default>
+        </entry>
     </group>
 </kcfg>

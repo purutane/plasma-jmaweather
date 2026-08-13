@@ -44,14 +44,16 @@ QML の構文・型エラーもここで出る（`qmllint` が無い環境では
 | `contents/ui/LocationSource.qml` | 現在地判定の通信（main.qml と設定画面の両方から使う） |
 | `contents/config/main.xml` | 設定項目の定義（KConfigXT） |
 | `contents/code/Forecast.js` | 気象庁 JSON の解析。**難しいところは全部ここ** |
+| `contents/code/Warning.js` | 警報・注意報の解析（選別と並び） |
 | `contents/code/Locate.js` | 緯度経度から地域を引く。問い合わせ先の一覧もここ |
 | `contents/code/Areas.js` | 予報区・地域の一覧（**生成物**） |
 | `contents/code/Telops.js` | 天気コード表（**生成物**） |
 | `contents/code/Geo.js` | 市区町村の代表点（**生成物**） |
-| `tools/generate_data.py` | 上の 3 つを気象庁のサイトから生成し直す |
+| `contents/code/WarnCodes.js` | 警報・注意報コード表（**生成物**） |
+| `tools/generate_data.py` | 上の 4 つを気象庁のサイトから生成し直す |
 | `tools/fetch_fixtures.py` | テスト用フィクスチャを取得する |
 
-`Areas.js`・`Telops.js`・`Geo.js` は手で編集しない。区域の再編や天気コードの追加があったときは
+`Areas.js`・`Telops.js`・`Geo.js`・`WarnCodes.js` は手で編集しない。区域の再編や天気コードの追加があったときは
 `python3 tools/generate_data.py` を流し、差分を確認してからコミットする。
 件数が変わると README の「58 予報区 / 142 地域」「118 コード」と食い違ってテストが落ちるので、
 README も併せて直す。
@@ -68,6 +70,24 @@ README も併せて直す。
 とくに `WEEK_STATION` の表が要。「どの地域がどの週間区域に寄るか」を名指しで押さえてあり、
 `resolveWeekIndex()` を並び順で寄せる素直な実装に書き換えると、根室・浜通り・伊豆諸島南部・
 大隅・種子島屋久島がここで落ちる。この 5 箇所は他のテストをすり抜けるので、表を薄くしない。
+
+## 警報・注意報
+
+予報とは別配信（`bosai/warning/data/warning/{予報区}.json`）で、`Warning.js` が解析する。
+踏みやすいのは 2 つ。
+
+- **`Areas.endpoint()` を通さない。** 予報と逆で、十勝 (014030) と奄美 (460040) は警報だと
+  自分のコードで配信されている。読み替え先（014100 / 460100）の警報 JSON にその地域は
+  入っていないので、読み替えるとこの 2 地域だけ警報が永久に出ない。
+  `warning.test.js` が `main.qml` の `warningUrl()` を正規表現で見張っている
+- **`status` が「解除」のものを落とす。** 解除済みが同じ配列に残り、実データでは発表中より
+  多いことすらある。コードを持たない「発表警報・注意報はなし」も同じ配列に来る
+
+コード表（`WarnCodes.js`）は `const` 配下に無く、警報ページのインラインスクリプトから
+写している。ページ側は洪水を「氾濫」と呼び替えて別配信から描くので表から洪水が抜けており、
+`generate_data.py` の `WARN_EXTRA` で補っている。ページに載った日は生成が衝突で止まる。
+表に無いコードは**捨てずに警報扱い**にしてコード番号のまま出す（黙って落とすと、
+コードが増えた日に特別警報を出し損ねる）。
 
 ## 現在地の自動判定
 
@@ -125,9 +145,12 @@ README も併せて直す。
 ## フィクスチャ
 
 `tests/fixtures/*.json` は気象庁の実データ。引っかかりどころを踏む 5 予報区だけをコミットしている
-（`tools/fetch_fixtures.py` の `PINNED` に理由が書いてある）。
+（`tools/fetch_fixtures.py` の `PINNED` に理由が書いてある）。警報は
+`tests/fixtures/warning/*.json` に別に置く（`WARNING_PINNED`、読み替えの要らない 4 予報区）。
 
 予報の中身は 1 日 3 回変わるので、**テストの期待値に気温や天気そのものを書かない。**
+警報はさらに水物で、**取得した日に全国どこにも発表が無いことがある。** 選別や並びの規則は
+`warning.test.js` のように合成データで固定し、実データには「解析が通るか」だけを聞く。
 「JSON から導いた値と一致するか」「最高 ≧ 最低か」のように、取り直しても成立する形で書く。
 時刻に依存する挙動は `h.loadForecast("2026-08-12T20:00:00+09:00")` のように
 `Date` を固定して確かめる（製品コード側に時刻の注入口は作っていない。

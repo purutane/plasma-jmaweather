@@ -23,6 +23,7 @@ KCM.SimpleKCM {
     property int cfg_updateInterval
     property int cfg_panelContent
     property bool cfg_showAreaNameInPanel
+    property bool cfg_showWarnings
 
     readonly property bool autoMode: page.cfg_locationMode === 0
     // 自動判定中はコンボに判定結果を映す。手動へ切り替えたときの出発点にもなる。
@@ -197,6 +198,23 @@ KCM.SimpleKCM {
             text: "パネルにも表示する"
             checked: page.cfg_showAreaNameInPanel
             onToggled: page.cfg_showAreaNameInPanel = checked
+        }
+
+        QQC2.CheckBox {
+            id: warningCheck
+            Kirigami.FormData.label: "警報・注意報:"
+            text: "発表中のものを表示する"
+            checked: page.cfg_showWarnings
+            onToggled: page.cfg_showWarnings = checked
+        }
+
+        QQC2.Label {
+            visible: warningCheck.checked
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 20
+            text: "パネルに印が付くのは警報以上のときだけです。注意報は展開表示に出ます。"
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
         }
 
         QQC2.SpinBox {

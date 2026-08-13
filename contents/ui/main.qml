@@ -9,6 +9,7 @@ import org.kde.kirigami as Kirigami
 import "../code/Forecast.js" as Forecast
 import "../code/Telops.js" as Telops
 import "../code/Areas.js" as Areas
+import "../code/Warning.js" as Warning
 
 PlasmoidItem {
     id: root
@@ -38,6 +39,17 @@ PlasmoidItem {
     property string errorText: ""
     property bool busy: false
 
+    property var warning: null
+    property string warningError: ""
+    readonly property bool showWarnings: Plasmoid.configuration.showWarnings
+    // 「発表なし」と「取れていない」を見分けられるよう、失敗しても枠は出す
+    readonly property bool showWarningBlock: showWarnings
+        && (warning !== null || warningError !== "")
+    // パネルで目立たせるのは警報以上だけ。注意報（とくに雷・濃霧）は全国のどこかで
+    // 年中出ているので、パネルに出すと常時点灯して意味が薄れる。
+    readonly property bool hasWarning: showWarnings && Warning.hasWarning(warning)
+    readonly property bool hasAnyWarning: showWarnings && Warning.hasAny(warning)
+
     readonly property var today: parsed ? Forecast.currentDay(parsed) : null
     readonly property bool hasData: today !== null && today !== undefined
 
@@ -62,6 +74,9 @@ PlasmoidItem {
             return "読み込み中…";
         }
         var parts = [];
+        if (hasAnyWarning) {
+            parts.push(Warning.summary(warning));
+        }
         if (today.text) {
             parts.push(Forecast.cleanText(today.text));
         }
@@ -80,6 +95,14 @@ PlasmoidItem {
     function overviewUrl() {
         return "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/"
              + Areas.endpoint(officeCode) + ".json";
+    }
+
+    // 警報は予報と逆で、読み替えてはいけない。十勝 (014030) と奄美 (460040) は
+    // 警報だと自分のコードで配信されていて、読み替え先（014100 / 460100）の
+    // JSON にはその地域が入っていない。Areas.endpoint() を挟むと警報が出なくなる。
+    function warningUrl() {
+        return "https://www.jma.go.jp/bosai/warning/data/warning/"
+             + officeCode + ".json";
     }
 
     function request(url, onOk, onFail) {
@@ -125,6 +148,25 @@ PlasmoidItem {
         }, function () {
             root.overview = "";
         });
+
+        if (!showWarnings) {
+            root.warning = null;
+            root.warningError = "";
+            return;
+        }
+        // 警報が取れなくても予報は出す。取れていないことは展開表示に出す。
+        request(warningUrl(), function (json) {
+            try {
+                root.warning = Warning.parse(json, root.areaCode);
+                root.warningError = "";
+            } catch (e) {
+                root.warning = null;
+                root.warningError = "警報・注意報を読めませんでした";
+            }
+        }, function () {
+            root.warning = null;
+            root.warningError = "警報・注意報を取得できませんでした";
+        });
     }
 
     // 予報区と地域は別々に届くので、片方だけ新しい状態で取りに行かないよう一拍待つ
@@ -136,6 +178,7 @@ PlasmoidItem {
 
     onOfficeCodeChanged: reloadDebounce.restart()
     onAreaCodeChanged: reloadDebounce.restart()
+    onShowWarningsChanged: reloadDebounce.restart()
 
     // ---- 現在地の自動判定 ----
 
@@ -269,6 +312,7 @@ PlasmoidItem {
             rowSpacing: 0
 
             Kirigami.Icon {
+                id: compactIcon
                 source: root.currentIcon
                 Layout.alignment: Qt.AlignCenter
                 implicitWidth: compact.vertical
@@ -276,6 +320,20 @@ PlasmoidItem {
                     : Math.min(compact.height, Kirigami.Units.iconSizes.medium)
                 implicitHeight: implicitWidth
                 active: compact.containsMouse
+
+                // 警報の印。アイコン名に頼ると環境によっては出ないので図形で描く。
+                // 縁を背景色で抜いて、天気アイコンの一部に見えないようにしている。
+                Rectangle {
+                    visible: root.hasWarning
+                    width: Math.max(5, Math.round(parent.width * 0.34))
+                    height: width
+                    radius: width / 2
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    color: Kirigami.Theme.negativeTextColor
+                    border.width: Math.max(1, Math.round(width * 0.18))
+                    border.color: Kirigami.Theme.backgroundColor
+                }
             }
 
             ColumnLayout {
@@ -402,10 +460,80 @@ PlasmoidItem {
                     width: scroll.availableWidth - Kirigami.Units.largeSpacing * 2
                     spacing: Kirigami.Units.largeSpacing
 
+                    // ---- 警報・注意報 ----
+                    // 見出しの文（headlineText）は予報区全体に対するもので、他の地域の
+                    // 話が混ざる。主役は地域別の警報名にして、そちらは添え物として出す。
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.largeSpacing
+                        spacing: Kirigami.Units.smallSpacing
+                        visible: root.showWarningBlock
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+                            visible: root.hasWarning
+
+                            Kirigami.Icon {
+                                source: "dialog-warning"
+                                implicitWidth: Kirigami.Units.iconSizes.small
+                                implicitHeight: Kirigami.Units.iconSizes.small
+                                Layout.alignment: Qt.AlignTop
+                            }
+
+                            PlasmaComponents.Label {
+                                text: Warning.warningNames(root.warning)
+                                color: Kirigami.Theme.negativeTextColor
+                                font.bold: true
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: text !== ""
+                            text: Warning.advisoryNames(root.warning)
+                            color: Kirigami.Theme.neutralTextColor
+                            wrapMode: Text.WordWrap
+                            font: Kirigami.Theme.smallFont
+                            Layout.fillWidth: true
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: root.hasAnyWarning && text !== ""
+                            text: root.warning ? root.warning.headline : ""
+                            wrapMode: Text.WordWrap
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                            Layout.fillWidth: true
+                        }
+
+                        // 何も出ていないことも情報。黙って空白にすると、
+                        // 警報を見ているのかどうかが利用者に分からない。
+                        PlasmaComponents.Label {
+                            visible: !root.hasAnyWarning && root.warningError === ""
+                            text: "発表中の警報・注意報はありません"
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.6
+                            Layout.fillWidth: true
+                        }
+
+                        PlasmaComponents.Label {
+                            visible: root.warningError !== ""
+                            text: root.warningError
+                            color: Kirigami.Theme.neutralTextColor
+                            font: Kirigami.Theme.smallFont
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+
                     // ---- 今日 ----
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.topMargin: Kirigami.Units.largeSpacing
+                        Layout.topMargin: root.showWarningBlock
+                            ? 0
+                            : Kirigami.Units.largeSpacing
                         spacing: Kirigami.Units.largeSpacing
 
                         Kirigami.Icon {

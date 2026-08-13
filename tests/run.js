@@ -55,6 +55,7 @@ async function main() {
     require("./cases/telops.test");
     require("./cases/locate.test");
     require("./cases/config.test");
+    const warning = require("./cases/warning.test");
     const forecast = require("./cases/forecast.test");
 
     if (every) {
@@ -66,6 +67,7 @@ async function main() {
             process.exit(2);
         }
         forecast.register(dir, "（全国）");
+        warning.register(path.join(dir, "warning"), "（全国）");
     }
 
     console.log(every ? "テスト（全国フィクスチャ込み）" : "テスト");

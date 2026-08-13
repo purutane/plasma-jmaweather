@@ -10,6 +10,8 @@ const path = require("path");
 
 const CODE_DIR = path.join(__dirname, "..", "contents", "code");
 const FIXTURE_DIR = path.join(__dirname, "fixtures");
+// 警報・注意報は予報とは別配信なので、同じ予報区コードで別ディレクトリに置く
+const WARNING_FIXTURE_DIR = path.join(FIXTURE_DIR, "warning");
 
 function readSource(file) {
     const src = fs.readFileSync(file, "utf8");
@@ -71,6 +73,16 @@ function loadGeo() {
 
 function loadLocate() {
     return instantiate(path.join(CODE_DIR, "Locate.js"));
+}
+
+function loadWarnCodes() {
+    return instantiate(path.join(CODE_DIR, "WarnCodes.js"));
+}
+
+function loadWarning() {
+    return instantiate(path.join(CODE_DIR, "Warning.js"), {
+        WarnCodes: loadWarnCodes()
+    });
 }
 
 // now を渡すと、その時刻に固定した状態の Forecast を返す（既定は実時刻）。
@@ -165,6 +177,7 @@ async function run(filter) {
 module.exports = {
     CODE_DIR,
     FIXTURE_DIR,
+    WARNING_FIXTURE_DIR,
     ROOT: path.join(__dirname, ".."),
     instantiate,
     fixedDate,
@@ -172,6 +185,8 @@ module.exports = {
     loadAreas,
     loadGeo,
     loadLocate,
+    loadWarnCodes,
+    loadWarning,
     loadForecast,
     fixture,
     fixtureCodes,
