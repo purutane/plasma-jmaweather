@@ -25,6 +25,9 @@ AREA_URL = "https://www.jma.go.jp/bosai/common/const/area.json"
 # 区域の境界そのものは配信されていないので、緯度経度からの逆引きはこれを代表点にする。
 RELM_URL = "https://www.jma.go.jp/bosai/common/const/class20relm.json"
 FORECAST_PAGE = "https://www.jma.go.jp/bosai/forecast/"
+# 一次細分区域 -> 気温の観測所（アメダス）の対応表。短期予報の気温は観測所単位で
+# 配信され、天気の区域とは数が合わないので、引くにはこの表が要る。
+FORECAST_AREA_URL = "https://www.jma.go.jp/bosai/forecast/const/forecast_area.json"
 # 警報・注意報コードの表は const 配下に配信されていない。警報ページのインライン
 # スクリプトが唯一の出どころなので、そこから写す。
 WARNING_PAGE = "https://www.jma.go.jp/bosai/warning/"
@@ -313,14 +316,39 @@ def write_warn_codes(codes):
     return path, len(codes)
 
 
-def write_areas(area):
+def area_stations(area, farea):
+    """一次細分区域 -> 気温の観測所コードの一覧。
+
+    forecast_area.json は 1 区域に複数の観測所を割り当てていることがある（21 区域）。
+    気象庁のページはその全部を行として並べるが、パネルには 1 つしか出せないので
+    並び順のまま持っておき、実際に配信に居るものを Forecast.js が選ぶ。
+    """
+    out = {}
+    missing = []
+    for office_code, office in area["offices"].items():
+        entries = {e["class10"]: e.get("amedas") or [] for e in farea.get(office_code, [])}
+        for code in office["children"]:
+            stations = entries.get(code) or []
+            if not stations:
+                missing.append(code)
+            out[code] = stations
+    if missing:
+        raise RuntimeError(
+            f"forecast_area.json に気温の観測所が無い区域: {sorted(missing)[:5]}"
+        )
+    return out
+
+
+def write_areas(area, farea):
     offices, class10s = area["offices"], area["class10s"]
     remap = ", ".join(f'"{k}": "{v}"' for k, v in sorted(REMAP.items()))
+    stations = area_stations(area, farea)
 
     lines = [
         ".pragma library",
         "",
         "// 気象庁 予報区一覧（common/const/area.json より生成）",
+        "// 気温の観測所は forecast/const/forecast_area.json より",
         "// tools/generate_data.py が書き出すので手で編集しない",
         "",
         "// 短期予報の配信コードが area.json と食い違う2件を補正する",
@@ -335,7 +363,12 @@ def write_areas(area):
     for code in sorted(offices):
         office = offices[code]
         kids = ", ".join(
-            f'{{"code": "{c}", "name": "{class10s[c]["name"]}"}}' for c in office["children"]
+            '{{"code": "{}", "name": "{}", "stations": [{}]}}'.format(
+                c,
+                class10s[c]["name"],
+                ", ".join(f'"{s}"' for s in stations[c]),
+            )
+            for c in office["children"]
         )
         lines.append(f'    {{"code": "{code}", "name": "{office["name"]}", "areas": [{kids}]}},')
     lines[-1] = lines[-1].rstrip(",")
@@ -370,7 +403,19 @@ def write_areas(area):
         '    return "";',
         "}",
         "",
-        "// 「北西部」「南部」だけではどこの話か分からないので予報区名を冠して返す。",
+        "// 気温の観測所の候補。1 区域に複数割り当てられていることがあるので、",
+        "// 実際に配信に載っているものを呼ぶ側が選ぶ。",
+        "function stationsOf(areaCode) {",
+        "    for (var i = 0; i < OFFICES.length; i++) {",
+        "        var as = OFFICES[i].areas;",
+        "        for (var j = 0; j < as.length; j++) {",
+        "            if (as[j].code === areaCode) return as[j].stations;",
+        "        }",
+        "    }",
+        "    return [];",
+        "}",
+        "",
+    "// 「北西部」「南部」だけではどこの話か分からないので予報区名を冠して返す。",
         "// 予報区名と地域名が同じものが 7 件あるので、その場合は重ねない。",
         "function displayName(officeCode, areaCode) {",
         "    var i = officeIndex(officeCode);",
@@ -469,6 +514,7 @@ def main():
         telops = extract_telops(get(FORECAST_PAGE, as_json=False))
         warn_codes = extract_warn_codes(get(WARNING_PAGE, as_json=False))
         area = get(AREA_URL)
+        farea = get(FORECAST_AREA_URL)
         relm = get(RELM_URL)
     except Exception as e:
         print(f"取得に失敗しました: {e}", file=sys.stderr)
@@ -478,7 +524,7 @@ def main():
     print(f"{os.path.relpath(path, ROOT)}: 天気コード {n} 件")
     path, n = write_warn_codes(warn_codes)
     print(f"{os.path.relpath(path, ROOT)}: 警報・注意報コード {n} 件")
-    path, offices, areas = write_areas(area)
+    path, offices, areas = write_areas(area, farea)
     print(f"{os.path.relpath(path, ROOT)}: 予報区 {offices} / 地域 {areas}")
     path, towns, covered = write_geo(area, relm)
     print(f"{os.path.relpath(path, ROOT)}: 市区町村 {towns} 件 / {covered} 地域")
