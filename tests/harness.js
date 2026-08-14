@@ -89,6 +89,7 @@ function loadWarning() {
 function loadForecast(now) {
     return instantiate(path.join(CODE_DIR, "Forecast.js"), {
         Telops: loadTelops(),
+        Areas: loadAreas(),
         Date: now ? fixedDate(now) : Date
     });
 }

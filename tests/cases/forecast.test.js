@@ -97,24 +97,36 @@ function register(dir, suffix) {
 
     // ---- 気温（観測所単位で配信される問題）----
 
-    test(`気温は週間側で確定した観測所から引く${suffix}`, () => {
+    // 短期の気温は気象庁の対応表（forecast_area.json 由来）で区域から直に引く。
+    // 週間側から逆算していた頃は、142 地域中 78 で別の場所の気温を出していた。
+    test(`短期の気温は対応表の観測所から引く${suffix}`, () => {
+        eachArea(dir, (area, json, code) => {
+            const cands = areas.stationsOf(area.code);
+            ok(cands.length > 0, `${code}/${area.code}: 対応表に観測所が無い`);
+
+            const stations = codesOf(json[0].timeSeries[2]);
+            const expected = cands.find((c) => stations.includes(c));
+            ok(
+                expected,
+                `${code}/${area.code}: 対応表の観測所 ${cands.join(",")} が短期の気温系列に無い。` +
+                    "予備の週間側に落ちて別の場所の気温を拾う"
+            );
+
+            const parsed = h.loadForecast().parse(json, area.code);
+            eq(parsed.stationCode, expected, `${code}/${area.code}: 観測所`);
+        });
+    });
+
+    test(`週間の気温は週間側の観測所から引く${suffix}`, () => {
         eachArea(dir, (area, json, code) => {
             if (json.length < 2 || json[1].timeSeries.length < 2) {
                 return;
             }
             const parsed = h.loadForecast().parse(json, area.code);
-            const weekStations = json[1].timeSeries[1].areas;
-            const chosen = weekStations.find((a) => a.area.name === parsed.stationName);
+            const weekStations = codesOf(json[1].timeSeries[1]);
             ok(
-                chosen,
-                `${code}/${area.code}: 観測所 ${parsed.stationName} が週間予報側に無い`
-            );
-            // README の主張: 週間側の観測所コードは短期側にも必ず存在する
-            const shortStations = codesOf(json[0].timeSeries[2]);
-            ok(
-                shortStations.includes(chosen.area.code),
-                `${code}/${area.code}: 週間の観測所 ${chosen.area.code} が短期側に無い。` +
-                    "位置フォールバックに落ちて別地域の気温を拾う"
+                weekStations.includes(parsed.weekStationCode),
+                `${code}/${area.code}: 週間の観測所 ${parsed.weekStationCode} が週間予報側に無い`
             );
         });
     });
@@ -139,6 +151,35 @@ function register(dir, suffix) {
                 );
             }
         });
+    });
+
+    // 5時・11時発表では今日の枠が [09時, 00時] の逆順で並び、後ろの00時に最高気温と
+    // 同じ値が入って届く。コミットしているフィクスチャは 17時発表なので普段は素通りするが、
+    // 取り直した時刻によっては効く。
+    test(`逆順に並んだ00時は最低気温として読まない${suffix}`, () => {
+        let seen = 0;
+        eachArea(dir, (area, json, code) => {
+            const ts2 = json[0].timeSeries[2];
+            const parsed = h.loadForecast().parse(json, area.code);
+            const maxAt = {};
+            ts2.timeDefines.forEach((t, i) => {
+                const date = t.substring(0, 10);
+                if (t.substring(11, 13) !== "00") {
+                    maxAt[date] = i;
+                    return;
+                }
+                if (maxAt[date] === undefined) {
+                    return;
+                }
+                seen++;
+                eq(
+                    parsed.days[date].tmin,
+                    null,
+                    `${code}/${area.code} ${date}: 最高気温 ${parsed.days[date].tmax} の写しを最低として読んでいる`
+                );
+            });
+        });
+        note(seen > 0 ? `${seen} 件が逆順` : "逆順の並びは無し（17時発表）");
     });
 
     test(`降水確率はその日の最大値を代表にする${suffix}`, () => {
@@ -176,12 +217,11 @@ function register(dir, suffix) {
 
 register(undefined, "");
 
-// 週間側のどの区域に寄るかを固定する。
-// 上の「観測所が短期側にも居るか」だけでは、別地域の予報を拾っていても通ってしまう
-// （並び順で寄せる実装でも偶然そこに観測所は在るため）。README が挙げている
+// 週間側のどの区域に寄るかを固定する。README が挙げている
 // 「並び順だと別地域を拾う 5 箇所」を名指しで押さえておく。
 //
-// 観測所は寄せ先の週間区域から決まるので、観測所名を見れば寄せ先が分かる。
+// 観測所は寄せ先の週間区域から決まるので、週間側の観測所名を見れば寄せ先が分かる
+// （短期の観測所は対応表から引くので、寄せ先の証拠にはならない）。
 // 区域の再編があれば落ちるが、そのときは実際に確認し直すべきなので落ちてよい。
 const WEEK_STATION = [
     ["014100", "014010", "根室地方", "釧路", "釧路・根室地方へ寄せる（並び順だと帯広を拾う）"],
@@ -207,12 +247,229 @@ test("週間予報の寄せ先が地域ごとに正しい", () => {
         const parsed = F.parse(h.fixture(office), code);
         eq(parsed.areaName, name, `${office}/${code}: 区域名`);
         eq(
-            parsed.stationName,
+            parsed.weekStationName,
             station,
-            `${name} の観測所${why ? "（" + why + "）" : ""}`
+            `${name} の週間側の観測所${why ? "（" + why + "）" : ""}`
         );
     }
     note(`${WEEK_STATION.length} 地域`);
+});
+
+// ---- 今日の最低気温（発表時刻で並びが変わる問題）----
+//
+// コミットしているフィクスチャは 17時発表なので、5時・11時発表の並びが入らない。
+// 実データで確認した形（11時発表の全 56 配信・171 観測所で同じ）を合成データで固定する。
+
+function tempsOnly(timeDefines, temps) {
+    return [
+        {
+            reportDatetime: timeDefines[0],
+            publishingOffice: "気象庁",
+            timeSeries: [
+                {
+                    timeDefines: [timeDefines[0]],
+                    areas: [
+                        {
+                            area: { name: "東京地方", code: "130010" },
+                            weatherCodes: ["100"],
+                            weathers: ["晴れ"],
+                            winds: ["北の風"]
+                        }
+                    ]
+                },
+                {
+                    timeDefines: [],
+                    areas: [{ area: { name: "東京地方", code: "130010" }, pops: [] }]
+                },
+                {
+                    timeDefines: timeDefines,
+                    areas: [{ area: { name: "東京", code: "44132" }, temps: temps }]
+                }
+            ]
+        }
+    ];
+}
+
+// 5時・11時発表の形（今日の枠が逆順で、00時に最高気温の写しが入る）
+const REVERSED = [
+    [
+        "2026-08-14T09:00:00+09:00",
+        "2026-08-14T00:00:00+09:00",
+        "2026-08-15T00:00:00+09:00",
+        "2026-08-15T09:00:00+09:00"
+    ],
+    ["29", "29", "23", "30"]
+];
+
+test("11時発表では今日の最低気温を空にする", () => {
+    const parsed = h
+        .loadForecast("2026-08-14T11:30:00+09:00")
+        .parse(tempsOnly(...REVERSED), "130010");
+    eq(parsed.days["2026-08-14"].tmax, 29, "今日の最高");
+    eq(parsed.days["2026-08-14"].tmin, null, "今日の最低（最高の写しなので読まない）");
+    eq(parsed.days["2026-08-15"].tmin, 23, "明日の最低");
+    eq(parsed.days["2026-08-15"].tmax, 30, "明日の最高");
+});
+
+test("17時発表の素直な並びはそのまま読む", () => {
+    const json = tempsOnly(
+        ["2026-08-15T00:00:00+09:00", "2026-08-15T09:00:00+09:00"],
+        ["23", "30"]
+    );
+    const parsed = h.loadForecast("2026-08-14T18:00:00+09:00").parse(json, "130010");
+    eq(parsed.days["2026-08-15"].tmin, 23, "最低");
+    eq(parsed.days["2026-08-15"].tmax, 30, "最高");
+});
+
+test("最高と同値でも順番どおりの00時なら最低として読む", () => {
+    // 冬日には本当に最高＝最低が起こる。「同値なら捨てる」で判定してはいけない
+    const json = tempsOnly(
+        ["2026-01-15T00:00:00+09:00", "2026-01-15T09:00:00+09:00"],
+        ["-2", "-2"]
+    );
+    const parsed = h.loadForecast("2026-01-14T18:00:00+09:00").parse(json, "130010");
+    eq(parsed.days["2026-01-15"].tmin, -2, "最低");
+    eq(parsed.days["2026-01-15"].tmax, -2, "最高");
+});
+
+// ---- 今日の最低気温の持ち越し ----
+
+// 翌日の分（08-15 の最低 23）が配信に入っている状態
+const TOMORROW = () => {
+    const F = h.loadForecast("2026-08-14T11:30:00+09:00");
+    return { F, parsed: F.parse(tempsOnly(...REVERSED), "130010") };
+};
+
+// 翌日になり、今日（08-15）の最低が配信から消えた状態
+const NEXT_DAY = [
+    [
+        "2026-08-15T09:00:00+09:00",
+        "2026-08-15T00:00:00+09:00",
+        "2026-08-16T00:00:00+09:00",
+        "2026-08-16T09:00:00+09:00"
+    ],
+    ["30", "30", "24", "31"]
+];
+
+test("先の日の最低気温を控える", () => {
+    const { F, parsed } = TOMORROW();
+    deepEq(
+        F.carriedFrom(parsed, { station: "", mins: "" }),
+        { station: "44132", mins: "2026-08-15=23" },
+        "控える内容"
+    );
+});
+
+test("控えた値を翌日の今日に当てはめる", () => {
+    // 前日に控えた 23 を、日付が変わったあとの「今日」に使う
+    const F = h.loadForecast("2026-08-15T11:30:00+09:00");
+    const parsed = F.parse(tempsOnly(...NEXT_DAY), "130010");
+    eq(parsed.days["2026-08-15"].tmin, null, "配信には今日の最低が無い");
+
+    const saved = { station: "44132", mins: "2026-08-15=23" };
+    eq(F.applyCarriedMin(parsed, saved), true, "当てはめた");
+    eq(parsed.days["2026-08-15"].tmin, 23, "持ち越した最低");
+    eq(parsed.days["2026-08-15"].tminCarried, true, "持ち越しの印");
+    eq(F.tempPairText(F.currentDay(parsed)), "30°/23°", "パネルの表示");
+});
+
+test("当てはめた持ち越しは次の更新でも残る", () => {
+    // 控えを 1 日分しか持たないと、当てはめた直後に翌日分で上書きして今日の値を失う。
+    // 予報は 30 分ごとに取り直すので、実機では次の更新で「29°」に戻って現れる。
+    const F = h.loadForecast("2026-08-15T11:30:00+09:00");
+    let saved = { station: "44132", mins: "2026-08-15=23" };
+
+    for (const round of ["1 回目", "2 回目", "3 回目"]) {
+        const parsed = F.parse(tempsOnly(...NEXT_DAY), "130010");
+        F.applyCarriedMin(parsed, saved);
+        eq(parsed.days["2026-08-15"].tmin, 23, `${round}: 今日の最低`);
+        saved = F.carriedFrom(parsed, saved);
+        ok(
+            saved.mins.indexOf("2026-08-15=23") >= 0,
+            `${round}: 今日の分が控えから消えた (${saved.mins})`
+        );
+    }
+    eq(saved.mins, "2026-08-15=23;2026-08-16=24", "明日の分も控わっている");
+});
+
+test("過ぎた日の控えは落とす", () => {
+    const { F, parsed } = TOMORROW();
+    const saved = { station: "44132", mins: "2026-08-12=20;2026-08-13=21;2026-08-14=22" };
+    eq(
+        F.carriedFrom(parsed, saved).mins,
+        "2026-08-14=22;2026-08-15=23",
+        "今日より前は捨てる"
+    );
+});
+
+test("観測所が変われば控えを捨てる", () => {
+    // 地域を変えた人に別の場所の気温を出さない
+    const { F, parsed } = TOMORROW();
+    const saved = { station: "44172", mins: "2026-08-14=18;2026-08-15=19" };
+    deepEq(
+        F.carriedFrom(parsed, saved),
+        { station: "44132", mins: "2026-08-15=23" },
+        "前の観測所の控えは残さない"
+    );
+});
+
+test("使えない控えは当てはめない", () => {
+    const F = h.loadForecast("2026-08-15T11:30:00+09:00");
+    const cases = [
+        [{ station: "44132", mins: "2026-08-14=23" }, "今日の分が無い（起動していなかった日がある）"],
+        [{ station: "44172", mins: "2026-08-15=23" }, "別の観測所（地域を変えた）"],
+        [{ station: "44132", mins: "" }, "まだ控えていない"],
+        [{ station: "44132", mins: "こわれた=データ;=;x" }, "壊れた控え"],
+        [null, "控えが無い"]
+    ];
+    for (const [saved, why] of cases) {
+        const parsed = F.parse(tempsOnly(...NEXT_DAY), "130010");
+        eq(F.applyCarriedMin(parsed, saved), false, why);
+        eq(parsed.days["2026-08-15"].tmin, null, `${why}: 埋めてはいけない`);
+        eq(F.tempPairText(F.currentDay(parsed)), "30°", `${why}: パネルは最高だけ`);
+    }
+});
+
+test("配信に今日の最低があるときは控えを使わない", () => {
+    // 17時発表の翌日分など、配信側のほうが新しい
+    const F = h.loadForecast("2026-08-15T04:00:00+09:00");
+    const json = tempsOnly(
+        ["2026-08-15T00:00:00+09:00", "2026-08-15T09:00:00+09:00"],
+        ["22", "30"]
+    );
+    const parsed = F.parse(json, "130010");
+    eq(F.applyCarriedMin(parsed, { station: "44132", mins: "2026-08-15=23" }), false);
+    eq(parsed.days["2026-08-15"].tmin, 22, "配信の値のまま");
+    eq(parsed.days["2026-08-15"].tminCarried, false, "持ち越しの印は付かない");
+});
+
+test("観測所が分からなければ控えを触らない", () => {
+    const F = h.loadForecast("2026-08-14T11:30:00+09:00");
+    eq(F.carriedFrom(null, { station: "", mins: "" }), null, "解析結果が無い");
+    // 気温の系列そのものが無い配信
+    const json = tempsOnly(...REVERSED);
+    json[0].timeSeries.length = 2;
+    eq(F.carriedFrom(F.parse(json, "130010"), { station: "", mins: "" }), null, "観測所が無い");
+});
+
+test("実データでも前日の配信から今日の最低を持ち越せる", () => {
+    // 08-12 17時発表のフィクスチャで控え、2 日後の今日へ当てはめる。
+    // 週間予報側からも控えるので、1 日空いても埋まる。
+    const F1 = h.loadForecast("2026-08-13T20:00:00+09:00");
+    const saved = F1.carriedFrom(F1.parse(TOKYO(), "130010"), { station: "", mins: "" });
+    eq(saved.station, "44132", "観測所");
+
+    const F2 = h.loadForecast("2026-08-14T11:30:00+09:00");
+    const parsed = F2.parse(tempsOnly(...REVERSED), "130010");
+    eq(parsed.days["2026-08-14"].tmin, null, "配信には今日の最低が無い");
+    eq(F2.applyCarriedMin(parsed, saved), true, "当てはめた");
+
+    // 期待値は JSON から導く（気温そのものは取り直すたびに変わる）
+    const week = TOKYO()[1].timeSeries[1];
+    const at = week.timeDefines.findIndex((t) => t.startsWith("2026-08-14"));
+    const expected = parseInt(week.areas[0].tempsMin[at], 10);
+    eq(parsed.days["2026-08-14"].tmin, expected, "週間予報の 08-14 の最低");
+    note(`${saved.mins}`);
 });
 
 // ---- 時刻に依存する挙動（Date を固定して確かめる）----
@@ -319,6 +576,15 @@ test("気温と降水確率の欠損はダッシュにする", () => {
     eq(F.popText(NaN), "–");
 });
 
+test("パネルの気温は片方しか無ければ 1 つだけ出す", () => {
+    const F = h.loadForecast();
+    eq(F.tempPairText({ tmax: 29, tmin: 23 }), "29°/23°");
+    eq(F.tempPairText({ tmax: 29, tmin: null }), "29°", "持ち越しも無い今日");
+    eq(F.tempPairText({ tmax: null, tmin: 23 }), "23°");
+    eq(F.tempPairText({ tmax: null, tmin: null }), "–");
+    eq(F.tempPairText(null), "–");
+});
+
 test("天気文の全角スペースを詰める", () => {
     const F = h.loadForecast();
     eq(F.cleanText("晴れ　時々　くもり"), "晴れ 時々 くもり");
@@ -344,17 +610,29 @@ test("知らない区域コードは先頭の区域に落とす", () => {
     ok(parsed.order.length > 0, "日付が空");
 });
 
-test("週間予報が無ければ観測所を位置で決める", () => {
+test("週間予報が無くても対応表から観測所を引ける", () => {
     const json = TOKYO();
     const F = h.loadForecast();
     const parsed = F.parse([json[0]], "130010");
     ok(parsed.order.length > 0, "日付が空");
-    // 観測所コードの手掛かりが無いので、天気の区域と同じ位置の観測所に落とす
-    const wi = json[0].timeSeries[0].areas.findIndex((a) => a.area.code === "130010");
-    eq(parsed.stationName, json[0].timeSeries[2].areas[wi].area.name, "位置フォールバック");
+    eq(parsed.stationCode, areas.stationsOf("130010")[0], "対応表の観測所");
+    eq(parsed.weekStationCode, "", "週間側は空のまま");
     ok(
         parsed.order.some((d) => parsed.days[d].tmax !== null),
         "短期分の気温が取れていない"
+    );
+});
+
+test("対応表にも週間予報にも無ければ観測所を位置で決める", () => {
+    const json = TOKYO();
+    const F = h.loadForecast();
+    // 知らない区域コードは対応表を引けない（区域が再編された直後など）
+    deepEq(areas.stationsOf("999999"), [], "対応表に無いこと");
+    const parsed = F.parse([json[0]], "999999");
+    eq(
+        parsed.stationCode,
+        json[0].timeSeries[2].areas[0].area.code,
+        "天気の区域と同じ位置（先頭）に落とす"
     );
 });
 

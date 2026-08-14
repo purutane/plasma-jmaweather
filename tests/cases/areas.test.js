@@ -22,6 +22,31 @@ test("予報区と地域の件数が README と一致する", () => {
     h.note(`${areas.OFFICES.length} 予報区 / ${ALL_AREAS.length} 地域`);
 });
 
+test("全地域に気温の観測所が付いている", () => {
+    // 観測所が欠けると、その地域だけ別の場所（週間側の観測所）の気温を出す
+    let multi = 0;
+    for (const { office, area } of ALL_AREAS) {
+        const stations = areas.stationsOf(area.code);
+        ok(
+            stations.length > 0,
+            `${office.name} - ${area.name}: 気温の観測所が無い`
+        );
+        for (const s of stations) {
+            ok(/^\d{5}$/.test(s), `${office.name} - ${area.name}: 観測所コード ${s}`);
+        }
+        if (stations.length > 1) {
+            multi++;
+        }
+    }
+    // 1 区域に複数割り当てられているものがある（気象庁のページは全部を並べる）
+    h.note(`${multi} 地域が複数の観測所を持つ`);
+});
+
+test("知らない区域コードの観測所は空", () => {
+    eq(areas.stationsOf("999999").length, 0, "存在しない区域");
+    eq(areas.stationsOf("").length, 0, "空のコード");
+});
+
 test("配信コードの読み替えは十勝と奄美の 2 件だけ", () => {
     eq(areas.endpoint("014030"), "014100", "十勝");
     eq(areas.endpoint("460040"), "460100", "奄美");

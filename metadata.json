@@ -12,7 +12,7 @@
         "Id": "io.github.purutane.jmaweather",
         "License": "MIT",
         "Name": "気象庁天気予報",
-        "Version": "1.2.1"
+        "Version": "1.2.2"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

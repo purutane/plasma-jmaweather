@@ -29,6 +29,14 @@
             <label>1.0 から持ち越した地域指定を手動へ寄せ終えたか（UI には出さない）</label>
             <default>false</default>
         </entry>
+        <entry name="carriedMinStation" type="String">
+            <label>控えてある最低気温の観測所コード（UI には出さない）</label>
+            <default></default>
+        </entry>
+        <entry name="carriedMins" type="String">
+            <label>控えてある最低気温「日付=℃」を ; でつないだもの（UI には出さない）</label>
+            <default></default>
+        </entry>
         <entry name="officeCode" type="String">
             <label>府県予報区コード</label>
             <default>130000</default>

@@ -17,6 +17,8 @@ KCM.SimpleKCM {
     property string cfg_detectedAt
     // UI には出さないが、宣言しておかないと設定画面を開いた拍子に既定値へ戻る
     property bool cfg_locationMigrated
+    property string cfg_carriedMinStation
+    property string cfg_carriedMins
     property string cfg_officeCode
     property string cfg_areaCode
     property string cfg_areaName

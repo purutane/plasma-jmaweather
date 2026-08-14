@@ -178,6 +178,27 @@ test("自動判定の結果は設定に保存して使い回す", () => {
     }
 });
 
+test("今日の最低気温は前日の配信から持ち越す", () => {
+    // 今日の最低は 5時・11時発表に入っていない。控えを取り損ねると出せなくなる
+    ok(
+        /Forecast\.applyCarriedMin\(/.test(MAIN_QML),
+        "取得のたびに控えを当てはめていない"
+    );
+    for (const name of ["carriedMinStation", "carriedMins"]) {
+        ok(
+            new RegExp(`Plasmoid\\.configuration\\.${name} =`).test(MAIN_QML),
+            `${name} を書き戻していない（次の日に使えない）`
+        );
+    }
+    // 予報は 30 分ごとに取り直すので、同じ値を毎回書き込まない
+    const body = MAIN_QML.match(/function carryMin\(parsed, saved\) \{([^]*?)\n    \}/);
+    ok(body, "main.qml の carryMin() を読めない");
+    ok(
+        /=== rec\.station[^]*?return;/.test(body[1]),
+        "変わっていないときに書き込みを打ち切っていない"
+    );
+});
+
 test("更新間隔の下限が設定画面と実装で揃っている", () => {
     const spin = CONFIG_QML.match(/from: (\d+)[^]*?to: (\d+)/);
     ok(spin, "ConfigGeneral.qml の更新間隔を読めない");

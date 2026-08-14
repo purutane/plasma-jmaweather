@@ -82,6 +82,7 @@ PlasmoidItem {
         }
         parts.push("最高 " + Forecast.tempText(today.tmax)
                  + " / 最低 " + Forecast.tempText(today.tmin)
+                 + (today.tminCarried ? "（前日発表）" : "")
                  + "   降水 " + Forecast.popText(today.pop));
         parts.push(Forecast.formatReportTime(parsed.reportTime));
         return parts.join("\n");
@@ -128,6 +129,24 @@ PlasmoidItem {
         xhr.send();
     }
 
+    function carriedMin() {
+        return {
+            station: Plasmoid.configuration.carriedMinStation,
+            mins: Plasmoid.configuration.carriedMins
+        };
+    }
+
+    // 今日の朝の最低気温は 5時・11時発表から消えるので、先の日の分を控えておいて翌日以降に使う。
+    // 予報は 30 分ごとに取り直すため、変わっていないのに毎回書き込まないようにする。
+    function carryMin(parsed, saved) {
+        var rec = Forecast.carriedFrom(parsed, saved);
+        if (!rec || (saved.station === rec.station && saved.mins === rec.mins)) {
+            return;
+        }
+        Plasmoid.configuration.carriedMinStation = rec.station;
+        Plasmoid.configuration.carriedMins = rec.mins;
+    }
+
     function reload() {
         if (busy) {
             return;
@@ -135,7 +154,11 @@ PlasmoidItem {
         busy = true;
         request(forecastUrl(), function (json) {
             try {
-                root.parsed = Forecast.parse(json, root.areaCode);
+                var parsed = Forecast.parse(json, root.areaCode);
+                var saved = root.carriedMin();
+                Forecast.applyCarriedMin(parsed, saved);
+                root.carryMin(parsed, saved);
+                root.parsed = parsed;
                 root.errorText = "";
             } catch (e) {
                 root.errorText = "予報データの解析に失敗しました: " + e;
@@ -269,7 +292,7 @@ PlasmoidItem {
             return "–";
         }
         var mode = Plasmoid.configuration.panelContent;
-        var temp = Forecast.tempText(today.tmax) + "/" + Forecast.tempText(today.tmin);
+        var temp = Forecast.tempPairText(today);
         var pop = Forecast.popText(today.pop);
         if (mode === 1) {
             return temp;

@@ -1,5 +1,6 @@
 .pragma library
 .import "Telops.js" as Telops
+.import "Areas.js" as Areas
 
 // 気象庁 forecast/data/forecast/{office}.json を解析する。
 // JSON は 2 要素の配列で、[0] が 3日先までの短期予報、[1] が週間予報。
@@ -78,6 +79,8 @@ function emptyDay(date) {
         pop: null,
         tmin: null,
         tmax: null,
+        // 今日の最低気温を前日の配信から持ち越したか（表示で区別するため）
+        tminCarried: false,
         reliability: null
     };
 }
@@ -90,7 +93,13 @@ function parse(json, areaCode) {
         order: [],
         pops6h: [],
         areaName: "",
-        stationName: ""
+        // 短期予報（今日・明日）の気温を出している観測所
+        stationName: "",
+        stationCode: "",
+        // 週間予報（明後日以降）の気温を出している観測所。区域のくくりが粗いので
+        // 短期側とは別の場所になることが多い（142 地域中 78）
+        weekStationName: "",
+        weekStationCode: ""
     };
 
     function day(date) {
@@ -152,8 +161,8 @@ function parse(json, areaCode) {
     }
 
     // --- 週間予報 ---
-    // 気温の観測所は短期・週間とも同じコード体系。週間側は天気の区域と 1 対 1 に並ぶので、
-    // まず週間の区域を確定させ、そこで得た観測所コードを短期の気温系列にも使う。
+    // 週間側は天気の区域と 1 対 1 に並ぶので、区域を確定させればその観測所も決まる。
+    // 週間の気温はこの観測所のもので、短期の気温を引く際の予備にもなる。
     var stationCode = null;
     if (json.length > 1) {
         var week = json[1];
@@ -182,6 +191,8 @@ function parse(json, areaCode) {
             var wti = Math.min(wwi, ws1.areas.length - 1);
             var wta = ws1.areas[wti];
             stationCode = wta.area.code;
+            out.weekStationName = wta.area.name;
+            out.weekStationCode = stationCode;
             for (var n2 = 0; n2 < ws1.timeDefines.length; n2++) {
                 var wtd = day(ymd(ws1.timeDefines[n2]));
                 var mn = blankToNull(wta.tempsMin[n2]);
@@ -198,26 +209,54 @@ function parse(json, areaCode) {
 
     // --- 短期予報: 気温 ---
     // 短期の気温は観測所が細かく、天気の区域とは数が合わないため位置では引けない。
-    // 週間側で確定した観測所コードで引き、見つからなければ位置に落とす。
+    // 気象庁が配信している対応表（Areas.js の stations）で区域から直に引く。
+    // 1 区域に複数割り当てられていることがあり（21 区域）、先頭が配信に載っていない
+    // こともある（愛媛県中予）ので、実際に居るものを順に探す。
+    //
+    // 表から引けなければ週間側で確定した観測所、それも駄目なら位置に落とす。
+    // 週間側は区域のくくりが粗く、そのまま使うと 142 地域中 78 で別の場所になる
+    // （千葉県北西部が銚子、山形県庄内が山形など）。予備なので順番を入れ替えない。
     if (short.timeSeries.length > 2) {
         var ts2 = short.timeSeries[2];
-        var ti = stationCode !== null ? findArea(ts2.areas, stationCode) : -1;
+        var ti = -1;
+        var cands = Areas.stationsOf(areaCode);
+        for (var c = 0; c < cands.length && ti < 0; c++) {
+            ti = findArea(ts2.areas, cands[c]);
+        }
+        if (ti < 0 && stationCode !== null) {
+            ti = findArea(ts2.areas, stationCode);
+        }
         if (ti < 0) {
             ti = Math.min(wi, ts2.areas.length - 1);
         }
         var ta = ts2.areas[ti];
         out.stationName = ta.area.name;
+        out.stationCode = ta.area.code;
+        var maxSeen = {};
         for (var k = 0; k < ts2.timeDefines.length; k++) {
             var tv = blankToNull(ta.temps[k]);
             if (tv === null) {
                 continue;
             }
-            var td = day(ymd(ts2.timeDefines[k]));
-            // 00時の値が最低気温、09時の値が最高気温
+            var tdate = ymd(ts2.timeDefines[k]);
+            var td = day(tdate);
+            // 00時の値が最低気温、09時の値が最高気温。
+            //
+            // ただし今日の朝の最低気温は 5時・11時発表には入っていない（発表時点で既に
+            // 過ぎているため）。枠だけは残っていて、今日の分が [09時, 00時] という逆順で
+            // 並び、後ろの00時に最高気温と同じ値が届く。元の電文ではこの枠の型が
+            // 「朝の最低気温」ではなく「最高気温」で、気象庁のページも読み捨てている。
+            // 同じ日の09時より後ろに来た00時は最低気温ではないので採らない。
+            //
+            // 発表時刻ではなく並び順で見るのは、冬日の「最高＝最低」を潰さないため。
             if (hour(ts2.timeDefines[k]) === "00") {
+                if (maxSeen[tdate]) {
+                    continue;
+                }
                 td.tmin = parseInt(tv, 10);
             } else {
                 td.tmax = parseInt(tv, 10);
+                maxSeen[tdate] = true;
             }
         }
     }
@@ -251,6 +290,95 @@ function isToday(day) {
     return !!day && day.date === todayStr();
 }
 
+// ---- 今日の最低気温の持ち越し ----
+//
+// 今日の朝の最低気温は 5時・11時発表には入っていないが、昨日の配信には「明日の最低」として
+// 入っていた（17時発表なら翌日の枠、5時・11時発表なら短期の「明日00時」の枠）。
+// 取得のたびに明日の分を控えておけば、日付が変わったあとに追加の通信なしで使える。
+
+// 控えは「日付=最低気温」を ; でつないだ 1 行。1 日分だけ持つと、当てはめた直後に
+// 翌日分で上書きして今日の値を失う（更新のたびに解析し直すため）。まとめて持つ。
+function parseCarried(text) {
+    var out = {};
+    if (!text) {
+        return out;
+    }
+    var parts = String(text).split(";");
+    for (var i = 0; i < parts.length; i++) {
+        var kv = parts[i].split("=");
+        if (kv.length !== 2) {
+            continue;
+        }
+        var v = parseInt(kv[1], 10);
+        if (!isNaN(v)) {
+            out[kv[0]] = v;
+        }
+    }
+    return out;
+}
+
+function formatCarried(map) {
+    var keys = [];
+    for (var k in map) {
+        if (map.hasOwnProperty(k)) {
+            keys.push(k);
+        }
+    }
+    keys.sort();
+    var parts = [];
+    for (var i = 0; i < keys.length; i++) {
+        parts.push(keys[i] + "=" + map[keys[i]]);
+    }
+    return parts.join(";");
+}
+
+// 控え直した内容を返す（変える必要が無ければ null）。観測所が変わっていたら前の控えは
+// 捨てる。地域を変えた人に別の場所の気温を出さないため。
+function carriedFrom(parsed, saved) {
+    if (!parsed || !parsed.stationCode) {
+        return null;
+    }
+    var t = todayStr();
+    var map = (saved && saved.station === parsed.stationCode)
+        ? parseCarried(saved.mins)
+        : {};
+    for (var k in map) {
+        if (map.hasOwnProperty(k) && k < t) {
+            delete map[k];
+        }
+    }
+    // 今日の分も入れておく。当てはめ済みの持ち越しがここで残り、次の更新でも使える。
+    // 週間予報のぶん（最大 7 日先）まで控えるので、数日空けて起動しても埋まる。
+    for (var i = 0; i < parsed.order.length; i++) {
+        var d = parsed.days[parsed.order[i]];
+        if (d.date >= t && d.tmin !== null) {
+            map[d.date] = d.tmin;
+        }
+    }
+    return { station: parsed.stationCode, mins: formatCarried(map) };
+}
+
+// 控えた値を今日へ当てはめる。観測所が食い違えば使わない（黙って捨てる）。
+function applyCarriedMin(parsed, saved) {
+    if (!parsed || !saved || !parsed.stationCode
+        || saved.station !== parsed.stationCode) {
+        return false;
+    }
+    var t = todayStr();
+    var d = parsed.days[t];
+    // 今日の最低が配信に載っているならそちらが新しい
+    if (!d || d.tmin !== null) {
+        return false;
+    }
+    var map = parseCarried(saved.mins);
+    if (!map.hasOwnProperty(t)) {
+        return false;
+    }
+    d.tmin = map[t];
+    d.tminCarried = true;
+    return true;
+}
+
 // 今日の残りの降水確率だけを返す（既に過ぎた時間帯は落とす）
 function remainingPops(parsed) {
     if (!parsed) {
@@ -279,6 +407,21 @@ function isNight() {
 
 function tempText(v) {
     return v === null || v === undefined || isNaN(v) ? "–" : v + "°";
+}
+
+// パネル用の「29°/23°」。持ち越しも無く最低が空のままの日は、
+// 「29°/–」と並べても情報が無いので残っている方だけを出す
+function tempPairText(day) {
+    if (!day) {
+        return "–";
+    }
+    if (day.tmin === null || day.tmin === undefined) {
+        return tempText(day.tmax);
+    }
+    if (day.tmax === null || day.tmax === undefined) {
+        return tempText(day.tmin);
+    }
+    return tempText(day.tmax) + "/" + tempText(day.tmin);
 }
 
 function popText(v) {
