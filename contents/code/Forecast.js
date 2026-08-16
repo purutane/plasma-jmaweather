@@ -32,6 +32,13 @@ function findArea(areas, code) {
     return -1;
 }
 
+// 区域が見つからないときは先頭に落とす。区域が再編されて設定に残ったコードが
+// 配信から消えていても、その予報区の予報だけは出せるようにしておく。
+function areaOrFirst(areas, code) {
+    var i = findArea(areas, code);
+    return i < 0 ? 0 : i;
+}
+
 function codesOf(areas) {
     var out = [];
     for (var i = 0; i < areas.length; i++) {
@@ -67,6 +74,16 @@ function resolveWeekIndex(weekAreas, shortCodes, areaCode, shortIndex) {
 
 function blankToNull(v) {
     return (v === undefined || v === null || v === "") ? null : v;
+}
+
+// 気象庁は欠測を空文字で送ってくる。気温・降水確率はここを通して数値に寄せる
+// （数値として読めないものも null にするので、NaN が days に入り込まない）。
+function intOrNull(v) {
+    if (v === undefined || v === null || v === "") {
+        return null;
+    }
+    var n = parseInt(v, 10);
+    return isNaN(n) ? null : n;
 }
 
 function emptyDay(date) {
@@ -115,10 +132,7 @@ function parse(json, areaCode) {
 
     // --- 短期予報: 天気・風 ---
     var ts0 = short.timeSeries[0];
-    var wi = findArea(ts0.areas, areaCode);
-    if (wi < 0) {
-        wi = 0;
-    }
+    var wi = areaOrFirst(ts0.areas, areaCode);
     var wa = ts0.areas[wi];
     out.areaName = wa.area.name;
     for (var i = 0; i < ts0.timeDefines.length; i++) {
@@ -134,18 +148,13 @@ function parse(json, areaCode) {
     // --- 短期予報: 降水確率（6時間ごと）---
     if (short.timeSeries.length > 1) {
         var ts1 = short.timeSeries[1];
-        var pi = findArea(ts1.areas, areaCode);
-        if (pi < 0) {
-            pi = 0;
-        }
-        var pa = ts1.areas[pi];
+        var pa = ts1.areas[areaOrFirst(ts1.areas, areaCode)];
         for (var j = 0; j < ts1.timeDefines.length; j++) {
-            var pv = blankToNull(pa.pops[j]);
-            if (pv === null) {
+            var n = intOrNull(pa.pops[j]);
+            if (n === null) {
                 continue;
             }
             var pd = day(ymd(ts1.timeDefines[j]));
-            var n = parseInt(pv, 10);
             // その日の代表値は最大値を採る
             if (pd.pop === null || n > pd.pop) {
                 pd.pop = n;
@@ -175,9 +184,9 @@ function parse(json, areaCode) {
                 wd.code = wc;
                 wd.label = Telops.label(wc);
             }
-            var wp = blankToNull(wwa.pops ? wwa.pops[m] : null);
+            var wp = intOrNull(wwa.pops ? wwa.pops[m] : null);
             if (wp !== null && wd.pop === null) {
-                wd.pop = parseInt(wp, 10);
+                wd.pop = wp;
             }
         }
 
@@ -190,13 +199,13 @@ function parse(json, areaCode) {
             out.weekStationCode = stationCode;
             for (var n2 = 0; n2 < ws1.timeDefines.length; n2++) {
                 var wtd = day(ymd(ws1.timeDefines[n2]));
-                var mn = blankToNull(wta.tempsMin[n2]);
-                var mx = blankToNull(wta.tempsMax[n2]);
+                var mn = intOrNull(wta.tempsMin[n2]);
+                var mx = intOrNull(wta.tempsMax[n2]);
                 if (mn !== null && wtd.tmin === null) {
-                    wtd.tmin = parseInt(mn, 10);
+                    wtd.tmin = mn;
                 }
                 if (mx !== null && wtd.tmax === null) {
-                    wtd.tmax = parseInt(mx, 10);
+                    wtd.tmax = mx;
                 }
             }
         }
@@ -229,7 +238,7 @@ function parse(json, areaCode) {
         out.stationCode = ta.area.code;
         var maxSeen = {};
         for (var k = 0; k < ts2.timeDefines.length; k++) {
-            var tv = blankToNull(ta.temps[k]);
+            var tv = intOrNull(ta.temps[k]);
             if (tv === null) {
                 continue;
             }
@@ -248,9 +257,9 @@ function parse(json, areaCode) {
                 if (maxSeen[tdate]) {
                     continue;
                 }
-                td.tmin = parseInt(tv, 10);
+                td.tmin = tv;
             } else {
-                td.tmax = parseInt(tv, 10);
+                td.tmax = tv;
                 maxSeen[tdate] = true;
             }
         }
@@ -400,8 +409,13 @@ function isNight() {
     return h >= 18 || h < 6;
 }
 
+// 欠測は「29°/–」のようにダッシュで埋める（枠を残さないと桁が動いて読みにくい）
+function unitText(v, unit) {
+    return v === null || v === undefined || isNaN(v) ? "–" : v + unit;
+}
+
 function tempText(v) {
-    return v === null || v === undefined || isNaN(v) ? "–" : v + "°";
+    return unitText(v, "°");
 }
 
 // パネル用の「29°/23°」。持ち越しも無く最低が空のままの日は、
@@ -420,16 +434,25 @@ function tempPairText(day) {
 }
 
 function popText(v) {
-    return v === null || v === undefined || isNaN(v) ? "–" : v + "%";
+    return unitText(v, "%");
 }
 
 var WDAY = ["日", "月", "火", "水", "木", "金", "土"];
 
-function dayLabel(dateStr) {
-    var t = todayStr();
+// "2026-08-16" → その日の 0 時の Date。曜日と日数差はここから取る。
+function toDate(dateStr) {
     var parts = dateStr.split("-");
-    var dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    var diff = Math.round((dt - new Date(t.split("-")[0], parseInt(t.split("-")[1], 10) - 1, t.split("-")[2])) / 86400000);
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+}
+
+// 「8/16(土)」。桁は揃えない（パネルにも週間の行にも収める必要がある）
+function shortDate(dateStr) {
+    var dt = toDate(dateStr);
+    return (dt.getMonth() + 1) + "/" + dt.getDate() + "(" + WDAY[dt.getDay()] + ")";
+}
+
+function dayLabel(dateStr) {
+    var diff = Math.round((toDate(dateStr) - toDate(todayStr())) / 86400000);
     if (diff === 0) {
         return "今日";
     }
@@ -439,13 +462,7 @@ function dayLabel(dateStr) {
     if (diff === 2) {
         return "明後日";
     }
-    return parseInt(parts[1], 10) + "/" + parseInt(parts[2], 10) + "(" + WDAY[dt.getDay()] + ")";
-}
-
-function shortDate(dateStr) {
-    var parts = dateStr.split("-");
-    var dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    return parseInt(parts[1], 10) + "/" + parseInt(parts[2], 10) + "(" + WDAY[dt.getDay()] + ")";
+    return shortDate(dateStr);
 }
 
 // 気象庁の天気文は全角スペース区切りなので、読みやすさのため詰める
