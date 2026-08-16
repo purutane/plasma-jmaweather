@@ -40,7 +40,11 @@ PlasmoidItem {
     property var parsed: null
     property string overview: ""
     property string errorText: ""
-    property bool busy: false
+    // 3 本とも終わるまで回す。予報だけを見ていると、概況や警報がまだ飛んでいる
+    // うちにインジケータが止まる。
+    readonly property bool busy: forecastRequest.busy
+        || overviewRequest.busy
+        || warningRequest.busy
 
     property var warning: null
     property string warningError: ""
@@ -112,24 +116,58 @@ PlasmoidItem {
              + officeCode + ".json";
     }
 
-    function request(url, onOk, onFail) {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", url);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE) {
-                return;
+    HttpRequest {
+        id: forecastRequest
+
+        onLoaded: function (json) {
+            try {
+                var parsed = Forecast.parse(json, root.areaCode);
+                var saved = root.carriedMin();
+                Forecast.applyCarriedMin(parsed, saved);
+                root.carryMin(parsed, saved);
+                root.parsed = parsed;
+                root.errorText = "";
+            } catch (e) {
+                root.errorText = "予報データの解析に失敗しました: " + e;
             }
-            if (xhr.status === 200) {
-                try {
-                    onOk(JSON.parse(xhr.responseText));
-                } catch (e) {
-                    onFail("応答を解析できませんでした: " + e);
-                }
-            } else {
-                onFail("取得に失敗しました (HTTP " + xhr.status + ")");
+        }
+
+        onFailed: function (message) {
+            root.errorText = message;
+        }
+    }
+
+    // 概況は無くても困らないので、取れなければ黙って畳む
+    HttpRequest {
+        id: overviewRequest
+
+        onLoaded: function (json) {
+            root.overview = json.text ? json.text.replace(/\n+/g, "\n").trim() : "";
+        }
+
+        onFailed: function (message) {
+            root.overview = "";
+        }
+    }
+
+    // 警報が取れなくても予報は出す。取れていないことは展開表示に出す。
+    HttpRequest {
+        id: warningRequest
+
+        onLoaded: function (json) {
+            try {
+                root.warning = Warning.parse(json, root.areaCode);
+                root.warningError = "";
+            } catch (e) {
+                root.warning = null;
+                root.warningError = "警報・注意報を読めませんでした";
             }
-        };
-        xhr.send();
+        }
+
+        onFailed: function (message) {
+            root.warning = null;
+            root.warningError = "警報・注意報を取得できませんでした";
+        }
     }
 
     function carriedMin() {
@@ -154,48 +192,15 @@ PlasmoidItem {
         if (busy) {
             return;
         }
-        busy = true;
-        request(forecastUrl(), function (json) {
-            try {
-                var parsed = Forecast.parse(json, root.areaCode);
-                var saved = root.carriedMin();
-                Forecast.applyCarriedMin(parsed, saved);
-                root.carryMin(parsed, saved);
-                root.parsed = parsed;
-                root.errorText = "";
-            } catch (e) {
-                root.errorText = "予報データの解析に失敗しました: " + e;
-            }
-            root.busy = false;
-        }, function (msg) {
-            root.errorText = msg;
-            root.busy = false;
-        });
-
-        request(overviewUrl(), function (json) {
-            root.overview = json.text ? json.text.replace(/\n+/g, "\n").trim() : "";
-        }, function () {
-            root.overview = "";
-        });
+        forecastRequest.get(forecastUrl());
+        overviewRequest.get(overviewUrl());
 
         if (!showWarnings) {
             root.warning = null;
             root.warningError = "";
             return;
         }
-        // 警報が取れなくても予報は出す。取れていないことは展開表示に出す。
-        request(warningUrl(), function (json) {
-            try {
-                root.warning = Warning.parse(json, root.areaCode);
-                root.warningError = "";
-            } catch (e) {
-                root.warning = null;
-                root.warningError = "警報・注意報を読めませんでした";
-            }
-        }, function () {
-            root.warning = null;
-            root.warningError = "警報・注意報を取得できませんでした";
-        });
+        warningRequest.get(warningUrl());
     }
 
     // 予報区と地域は別々に届くので、片方だけ新しい状態で取りに行かないよう一拍待つ

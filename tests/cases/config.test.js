@@ -258,6 +258,26 @@ test("metadata.json の体裁", () => {
     ok(meta["X-Plasma-API-Minimum-Version"], "X-Plasma-API-Minimum-Version が無い");
 });
 
+test("通信は見張り付きの HttpRequest を通す", () => {
+    // QML の XMLHttpRequest はタイムアウトを持たない。直に組み立てると、応答が
+    // 返らないまま繋がりっぱなしになったときに busy が戻らず、更新ボタンと
+    // 再判定ボタンが無効のまま固まる。
+    const http = read("contents", "ui", "HttpRequest.qml");
+    ok(/Timer/.test(http), "HttpRequest.qml に見張りの Timer が無い");
+    ok(/\.abort\(\)/.test(http), "HttpRequest.qml が打ち切っていない");
+
+    const dir = path.join(h.ROOT, "contents", "ui");
+    for (const file of fs.readdirSync(dir)) {
+        if (!file.endsWith(".qml") || file === "HttpRequest.qml") {
+            continue;
+        }
+        ok(
+            !/new XMLHttpRequest\(/.test(read("contents", "ui", file)),
+            `${file} が XMLHttpRequest を直に組み立てている`
+        );
+    }
+});
+
 test("QML ファイルに残骸が無い", () => {
     const dir = path.join(h.ROOT, "contents", "ui");
     const files = fs.readdirSync(dir).filter((f) => f.endsWith(".qml"));
