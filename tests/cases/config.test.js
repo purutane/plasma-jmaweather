@@ -103,6 +103,18 @@ test("パネル表示の選択肢が定義と設定画面と実装で揃って�
     ok(/return "";\s*$/.test(body[1].trim()), "panelText() が空文字で終わっていない");
 });
 
+test("「アイコンのみ」なら読み込み中でも文字を出さない", () => {
+    // 欠損（読み込み中・取得失敗）を先頭で return すると、0 番を選んでいる人の
+    // パネルにも文字が出る。mode を読むより前に return が無いことで見張る。
+    const body = MAIN_QML.match(/function panelText\(\) \{([^]*?)\n    \}/);
+    ok(body, "main.qml の panelText() を読めない");
+    const beforeMode = body[1].split("panelContent")[0];
+    ok(
+        !/\breturn\b/.test(beforeMode),
+        "panelText() が panelContent を見る前に return している"
+    );
+});
+
 test("既定値が選択肢の範囲に収まる", () => {
     for (const name of ["panelContent", "locationMode"]) {
         const choices = choicesOf(name);

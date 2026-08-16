@@ -287,13 +287,12 @@ PlasmoidItem {
         }
     }
 
+    // 欠損は値ごとのダッシュで表す。先に「読み込み中は –」と返してしまうと、
+    // 「アイコンのみ」を選んでいる人のパネルにも起動直後と取得失敗中だけ文字が出る。
     function panelText() {
-        if (!hasData) {
-            return "–";
-        }
         var mode = Plasmoid.configuration.panelContent;
-        var temp = Forecast.tempPairText(today);
-        var pop = Forecast.popText(today.pop);
+        var temp = hasData ? Forecast.tempPairText(today) : "–";
+        var pop = hasData ? Forecast.popText(today.pop) : "–";
         if (mode === 1) {
             return temp;
         }
