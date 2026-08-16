@@ -41,19 +41,24 @@ QML の構文・型エラーもここで出る（`qmllint` が無い環境では
 | --- | --- |
 | `contents/ui/main.qml` | 本体。パネル表示（compact）と展開表示（full）の両方 |
 | `contents/ui/ConfigGeneral.qml` | 設定画面 |
-| `contents/ui/LocationSource.qml` | 現在地判定の通信（main.qml と設定画面の両方から使う） |
+| `contents/ui/LocationSource.qml` | 現在地判定の段取り（main.qml と設定画面の両方から使う） |
+| `contents/ui/HttpRequest.qml` | JSON を 1 本取ってくる。**通信はすべてここを通す** |
 | `contents/config/main.xml` | 設定項目の定義（KConfigXT） |
 | `contents/code/Forecast.js` | 気象庁 JSON の解析。**難しいところは全部ここ** |
 | `contents/code/Warning.js` | 警報・注意報の解析（選別と並び） |
-| `contents/code/Locate.js` | 緯度経度から地域を引く。問い合わせ先の一覧もここ |
-| `contents/code/Areas.js` | 予報区・地域の一覧と、地域ごとの気温観測所（**生成物**） |
-| `contents/code/Telops.js` | 天気コード表（**生成物**） |
-| `contents/code/Geo.js` | 市区町村の代表点（**生成物**） |
-| `contents/code/WarnCodes.js` | 警報・注意報コード表（**生成物**） |
-| `tools/generate_data.py` | 上の 4 つを気象庁のサイトから生成し直す |
+| `contents/code/Locate.js` | 緯度経度から地域を引く。使う地域の決め方（`effectiveArea()`）もここ |
+| `contents/code/Areas.js` | 予報区・地域を引く（表は `AreasData.js`） |
+| `contents/code/Telops.js` | 天気コードからアイコンとラベルを引く（表は `TelopsData.js`） |
+| `contents/code/WarnCodes.js` | 警報・注意報コードから名称と深刻さを引く（表は `WarnCodesData.js`） |
+| `contents/code/*Data.js`・`Geo.js` | 気象庁のサイトから起こした表（**生成物**） |
+| `tools/generate_data.py` | 上の生成物を気象庁のサイトから作り直す |
 | `tools/fetch_fixtures.py` | テスト用フィクスチャを取得する |
 
-`Areas.js`・`Telops.js`・`Geo.js`・`WarnCodes.js` は手で編集しない。区域の再編や天気コードの追加があったときは
+**生成物には表しか置かない。** 引く関数は手書きの `Areas.js`・`Telops.js`・`WarnCodes.js` にある。
+ロジックを生成側（`generate_data.py` の中の文字列）へ戻すと qmllint もテストも届かず、
+再生成の差分にロジックの変更が紛れ込む。`areas.test.js` の「生成物には表だけを置く」が見張っている。
+
+`*Data.js` と `Geo.js` は手で編集しない。区域の再編や天気コードの追加があったときは
 `python3 tools/generate_data.py` を流し、差分を確認してからコミットする。
 件数が変わると README の「58 予報区 / 142 地域」「118 コード」と食い違ってテストが落ちるので、
 README も併せて直す。
@@ -65,7 +70,7 @@ README も併せて直す。
 どれも全国の実データで確認して決めた挙動で、素直に書き直すと特定の地域だけ壊れる。
 
 **気温の観測所は対応表から引く。** どの区域がどの観測所かは `forecast_area.json` が配信していて、
-`Areas.js` の `stations` に入っている（`stationsOf()`）。週間予報側から逆算する昔の実装に戻すと、
+`AreasData.js` の `stations` に入っている（`Areas.stationsOf()`）。週間予報側から逆算する昔の実装に戻すと、
 週間の区域が粗いぶん 142 地域中 78 で別の場所の気温を出す（千葉県北西部が銚子になる）。
 先頭の観測所が配信に載っていない区域が 1 つある（愛媛県中予）ので、候補は順に試す。
 `tests/fixtures/380000.json` はそのために置いてある。
@@ -112,7 +117,7 @@ README も併せて直す。
   多いことすらある。コードを持たない「発表警報・注意報はなし」も同じ配列に来る。ただし
   「警報から注意報」「危険警報から警報」は格下げで発表中なので残す（`code` が今の状態）
 
-コード表（`WarnCodes.js`）は `const` 配下に無く、警報ページのインラインスクリプトから
+コード表（`WarnCodesData.js`）は `const` 配下に無く、警報ページのインラインスクリプトから
 写している。ページ側は洪水を「氾濫」と呼び替えて別配信から描くので表から洪水が抜けており、
 `generate_data.py` の `WARN_EXTRA` で補っている。ページに載った日は生成が衝突で止まる。
 表に無いコードは**捨てずに警報扱い**にしてコード番号のまま出す（黙って落とすと、
@@ -144,7 +149,7 @@ README も併せて直す。
 3. 実機で確認する。テストは見た目もアイコンの実在も見ていない
 4. README を直す。「58 予報区 / 142 地域」「118 コード」のような数字や、増えた設定項目
 5. `metadata.json` の `Version` を上げる。利用者が入れ直すかどうかを判断できるのはここだけ
-6. 生成物の再生成とロジックの変更はコミットを分ける。`Areas.js` の差分に埋もれるとレビューできない
+6. 生成物の再生成とロジックの変更はコミットを分ける。`AreasData.js` の差分に埋もれるとレビューできない
 
 ### 計画ドキュメント
 

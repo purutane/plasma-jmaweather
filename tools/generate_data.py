@@ -36,10 +36,6 @@ UA = {"User-Agent": "plasma-jmaweather-datagen/1.0"}
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "contents", "code")
 
-# area.json の予報区コードでは短期予報が 404 になる 2 件。
-# 気象庁は別コードで配信しているので読み替える。
-REMAP = {"014030": "014100", "460040": "460100"}
-
 # 外接矩形の中心を代表点にできない市区町村。遠くの無人島まで市域に含むため、
 # 中心が海の上に落ちて有人島から数百km離れる。有人島の位置を名指しで置き換える。
 # 小笠原村と久米島町は補正しないと、その地域に住む人を判定できない（100km の蓋に掛かる）。
@@ -99,6 +95,20 @@ def get(url, as_json=True):
     return json.loads(raw) if as_json else raw
 
 
+def write_js(name, comment, lines):
+    """データだけの JS を書き出す。
+
+    引く関数は手書きの Areas.js / Telops.js / WarnCodes.js が持っていて、
+    ここが書き出すのは表そのものだけ。ロジックを Python の文字列で持つと
+    qmllint もテストも届かず、再生成の差分にロジックの変更が紛れ込む。
+    """
+    head = [".pragma library", ""] + [f"// {c}" for c in comment] + [""]
+    path = os.path.join(OUT_DIR, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(head + lines) + "\n")
+    return path
+
+
 def extract_telops(page):
     """予報ページのインラインスクリプトから R.TELOPS の定義を切り出す。"""
     start = page.index("R.TELOPS=") + len("R.TELOPS=")
@@ -125,44 +135,22 @@ def write_telops(telops):
     if unknown:
         raise RuntimeError(f"DAY_ICON に未登録の svg があります: {sorted(unknown)}")
 
-    lines = [
-        ".pragma library",
-        "",
-        "// 気象庁 天気コード表（www.jma.go.jp の TELOPS より生成）",
-        "// tools/generate_data.py が書き出すので手で編集しない",
-        "// code -> [Breezeアイコン名, 日本語ラベル]",
-        "var TELOPS = {",
-    ]
+    lines = ["var TELOPS = {"]
     for code in sorted(telops, key=int):
         entry = telops[code]
         lines.append(f'    "{code}": ["{DAY_ICON[entry[0]]}", "{entry[3]}"],')
     lines[-1] = lines[-1].rstrip(",")
-    lines += [
-        "};",
-        "",
-        "var NIGHT = {",
-        '    "weather-clear": "weather-clear-night",',
-        '    "weather-few-clouds": "weather-few-clouds-night",',
-        '    "weather-clouds": "weather-clouds-night",',
-        '    "weather-showers-day": "weather-showers-night",',
-        '    "weather-showers-scattered-day": "weather-showers-scattered-night",',
-        '    "weather-snow-scattered-day": "weather-snow-scattered-night"',
-        "};",
-        "",
-        "function icon(code, night) {",
-        "    var e = TELOPS[String(code)];",
-        '    if (!e) return "weather-none-available";',
-        "    return night && NIGHT[e[0]] ? NIGHT[e[0]] : e[0];",
-        "}",
-        "",
-        "function label(code) {",
-        "    var e = TELOPS[String(code)];",
-        '    return e ? e[1] : "--";',
-        "}",
-    ]
-    path = os.path.join(OUT_DIR, "Telops.js")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    lines.append("};")
+
+    path = write_js(
+        "TelopsData.js",
+        [
+            "気象庁 天気コード表（www.jma.go.jp の TELOPS より生成）",
+            "tools/generate_data.py が書き出すので手で編集しない。引く側は Telops.js",
+            "code -> [Breezeアイコン名, 日本語ラベル]",
+        ],
+        lines,
+    )
     return path, len(telops)
 
 
@@ -272,47 +260,22 @@ def extract_warn_codes(page):
 
 
 def write_warn_codes(codes):
-    lines = [
-        ".pragma library",
-        "",
-        "// 気象庁 警報・注意報コード表（www.jma.go.jp/bosai/warning/ のページ内定義より生成）",
-        "// tools/generate_data.py が書き出すので手で編集しない",
-        "// code -> [名称, レベル]",
-        "var CODES = {",
-    ]
+    lines = ["var CODES = {"]
     for code in sorted(codes):
         name, level = codes[code]
         lines.append(f'    "{code}": ["{name}", {level}],')
     lines[-1] = lines[-1].rstrip(",")
-    lines += [
-        "};",
-        "",
-        "// 気象庁のページが使っている重み。数値の大小がそのまま深刻さの順になる。",
-        "var ADVISORY = 20;   // 注意報",
-        "var WARNING = 30;    // 警報",
-        "var CRITICAL = 40;   // 危険警報",
-        "var EMERGENCY = 50;  // 特別警報",
-        "",
-        "// 表に無いコードは新設された警報とみなして警報扱いにする。",
-        "// 名前が分からないものを黙って捨てると、コードが増えた日に特別警報を",
-        "// 出し損ねる。出しすぎる方に倒しておき、コード番号をそのまま見せる。",
-        "function name(code) {",
-        "    var e = CODES[String(code)];",
-        '    return e ? e[0] : "警報・注意報（コード " + code + "）";',
-        "}",
-        "",
-        "function level(code) {",
-        "    var e = CODES[String(code)];",
-        "    return e ? e[1] : WARNING;",
-        "}",
-        "",
-        "function known(code) {",
-        "    return !!CODES[String(code)];",
-        "}",
-    ]
-    path = os.path.join(OUT_DIR, "WarnCodes.js")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    lines.append("};")
+
+    path = write_js(
+        "WarnCodesData.js",
+        [
+            "気象庁 警報・注意報コード表（www.jma.go.jp/bosai/warning/ のページ内定義より生成）",
+            "tools/generate_data.py が書き出すので手で編集しない。引く側は WarnCodes.js",
+            "code -> [名称, レベル]。レベルの意味は WarnCodes.js の定数を見る",
+        ],
+        lines,
+    )
     return path, len(codes)
 
 
@@ -341,25 +304,9 @@ def area_stations(area, farea):
 
 def write_areas(area, farea):
     offices, class10s = area["offices"], area["class10s"]
-    remap = ", ".join(f'"{k}": "{v}"' for k, v in sorted(REMAP.items()))
     stations = area_stations(area, farea)
 
-    lines = [
-        ".pragma library",
-        "",
-        "// 気象庁 予報区一覧（common/const/area.json より生成）",
-        "// 気温の観測所は forecast/const/forecast_area.json より",
-        "// tools/generate_data.py が書き出すので手で編集しない",
-        "",
-        "// 短期予報の配信コードが area.json と食い違う2件を補正する",
-        f"var REMAP = {{ {remap} }};",
-        "",
-        "function endpoint(officeCode) {",
-        "    return REMAP[officeCode] || officeCode;",
-        "}",
-        "",
-        "var OFFICES = [",
-    ]
+    lines = ["var OFFICES = ["]
     for code in sorted(offices):
         office = offices[code]
         kids = ", ".join(
@@ -372,66 +319,17 @@ def write_areas(area, farea):
         )
         lines.append(f'    {{"code": "{code}", "name": "{office["name"]}", "areas": [{kids}]}},')
     lines[-1] = lines[-1].rstrip(",")
-    lines += [
-        "];",
-        "",
-        "function officeIndex(code) {",
-        "    for (var i = 0; i < OFFICES.length; i++) {",
-        "        if (OFFICES[i].code === code) return i;",
-        "    }",
-        "    return -1;",
-        "}",
-        "",
-        "function areaIndex(officeCode, areaCode) {",
-        "    var i = officeIndex(officeCode);",
-        "    if (i < 0) return -1;",
-        "    var as = OFFICES[i].areas;",
-        "    for (var j = 0; j < as.length; j++) {",
-        "        if (as[j].code === areaCode) return j;",
-        "    }",
-        "    return -1;",
-        "}",
-        "",
-        "// 地域コードは全国で一意なので、そこから予報区を引き直せる（Geo.js の逆引き用）",
-        "function officeOf(areaCode) {",
-        "    for (var i = 0; i < OFFICES.length; i++) {",
-        "        var as = OFFICES[i].areas;",
-        "        for (var j = 0; j < as.length; j++) {",
-        "            if (as[j].code === areaCode) return OFFICES[i].code;",
-        "        }",
-        "    }",
-        '    return "";',
-        "}",
-        "",
-        "// 気温の観測所の候補。1 区域に複数割り当てられていることがあるので、",
-        "// 実際に配信に載っているものを呼ぶ側が選ぶ。",
-        "function stationsOf(areaCode) {",
-        "    for (var i = 0; i < OFFICES.length; i++) {",
-        "        var as = OFFICES[i].areas;",
-        "        for (var j = 0; j < as.length; j++) {",
-        "            if (as[j].code === areaCode) return as[j].stations;",
-        "        }",
-        "    }",
-        "    return [];",
-        "}",
-        "",
-    "// 「北西部」「南部」だけではどこの話か分からないので予報区名を冠して返す。",
-        "// 予報区名と地域名が同じものが 7 件あるので、その場合は重ねない。",
-        "function displayName(officeCode, areaCode) {",
-        "    var i = officeIndex(officeCode);",
-        '    if (i < 0) return "";',
-        "    var office = OFFICES[i];",
-        "    // 「鹿児島県（奄美地方除く）」のような但し書きは長くなるだけなので落とす",
-        '    var prefix = office.name.replace(/（[^）]*）/g, "");',
-        "    var j = areaIndex(officeCode, areaCode);",
-        "    if (j < 0) return prefix;",
-        "    var area = office.areas[j].name;",
-        '    return area === prefix ? area : prefix + " - " + area;',
-        "}",
-    ]
-    path = os.path.join(OUT_DIR, "Areas.js")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    lines.append("];")
+
+    path = write_js(
+        "AreasData.js",
+        [
+            "気象庁 予報区一覧（common/const/area.json より生成）",
+            "気温の観測所は forecast/const/forecast_area.json より",
+            "tools/generate_data.py が書き出すので手で編集しない。引く側は Areas.js",
+        ],
+        lines,
+    )
     return path, len(offices), sum(len(o["children"]) for o in offices.values())
 
 

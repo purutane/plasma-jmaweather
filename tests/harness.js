@@ -59,12 +59,22 @@ function fixedDate(iso) {
     };
 }
 
+// 表（*Data.js）は生成物で、引く側（Telops.js など）は手書き。QML では
+// `.import "TelopsData.js" as Data` で繋がっているので、ここでも Data を渡す。
+function loadData(name) {
+    return instantiate(path.join(CODE_DIR, name));
+}
+
 function loadTelops() {
-    return instantiate(path.join(CODE_DIR, "Telops.js"));
+    return instantiate(path.join(CODE_DIR, "Telops.js"), {
+        Data: loadData("TelopsData.js")
+    });
 }
 
 function loadAreas() {
-    return instantiate(path.join(CODE_DIR, "Areas.js"));
+    return instantiate(path.join(CODE_DIR, "Areas.js"), {
+        Data: loadData("AreasData.js")
+    });
 }
 
 function loadGeo() {
@@ -78,7 +88,9 @@ function loadLocate() {
 }
 
 function loadWarnCodes() {
-    return instantiate(path.join(CODE_DIR, "WarnCodes.js"));
+    return instantiate(path.join(CODE_DIR, "WarnCodes.js"), {
+        Data: loadData("WarnCodesData.js")
+    });
 }
 
 function loadWarning() {

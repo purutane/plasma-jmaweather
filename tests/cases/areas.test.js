@@ -1,5 +1,6 @@
-// Areas.js は tools/generate_data.py の生成物。気象庁が区域を再編したときに
-// 何が変わったのかを気付けるようにしておく。README に書いた件数との突き合わせも兼ねる。
+// Areas.js の表（AreasData.js）は tools/generate_data.py の生成物。気象庁が区域を
+// 再編したときに何が変わったのかを気付けるようにしておく。README に書いた件数との
+// 突き合わせも兼ねる。
 
 const fs = require("fs");
 const path = require("path");
@@ -141,4 +142,27 @@ test("既定の設定値が実在する地域を指す", () => {
     ok(areas.areaIndex(office, area) >= 0, `既定の地域 ${area} が無い`);
     // 既定の areaName は displayName から組み立てたものと揃えておく
     eq(pick("areaName"), areas.displayName(office, area), "既定の地域名");
+});
+
+test("生成物には表だけを置く", () => {
+    // ロジックを生成物側（＝tools/generate_data.py の文字列）に置くと、
+    // qmllint もテストも届かず、再生成の差分にロジックの変更が紛れ込む。
+    const dir = path.join(h.ROOT, "contents", "code");
+    const generated = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith("Data.js") || f === "Geo.js");
+    ok(generated.length >= 4, `生成物が見つからない (${generated.join(", ")})`);
+
+    for (const file of generated) {
+        const src = fs.readFileSync(path.join(dir, file), "utf8");
+        ok(
+            !/^\s*function\s/m.test(src),
+            `${file} に関数がある。引く側（手書きの ${file.replace("Data", "")}）へ移す`
+        );
+        ok(
+            /generate_data\.py/.test(src),
+            `${file} に生成物である旨の断り書きが無い`
+        );
+    }
+    h.note(generated.sort().join(", "));
 });
