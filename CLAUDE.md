@@ -39,7 +39,8 @@ QML の構文・型エラーもここで出る（`qmllint` が無い環境では
 
 | パス | 中身 |
 | --- | --- |
-| `contents/ui/main.qml` | 本体。パネル表示（compact）と展開表示（full）の両方 |
+| `contents/ui/main.qml` | 本体。設定の解決・取得・パネル表示（compact）と、展開表示の組み立て |
+| `contents/ui/*Section.qml`・`ForecastHeader.qml` | 展開表示の中身（警報・今日・降水確率・週間・概況） |
 | `contents/ui/ConfigGeneral.qml` | 設定画面 |
 | `contents/ui/LocationSource.qml` | 現在地判定の段取り（main.qml と設定画面の両方から使う） |
 | `contents/ui/HttpRequest.qml` | JSON を 1 本取ってくる。**通信はすべてここを通す** |
@@ -161,6 +162,17 @@ README も併せて直す。
 「なぜその挙動か」は README の実装メモへ、「次に触る人が踏む地雷」はこの CLAUDE.md へ、
 「壊れたら気づきたいこと」はテストへ移してから消すこと。
 計画ドキュメントを残すと、同じ話が 2 箇所に載って片方だけ古くなる。
+
+## 展開表示を触るとき
+
+中身はセクションごとの部品に分かれていて、**設定を読むのは `main.qml` だけ**。部品は
+プロパティで受け取る（`day`・`warning`・`parsed` など）。部品が `Plasmoid.configuration` を
+直に読むと、`config.test.js` の「QML が読む設定はすべて定義済み」が落ちる。設定の検査が
+`main.qml` の走査に頼っているので、そこをすり抜けさせないための約束。
+
+部品は素の QML なので、合成データを流して単体で描画を確かめられる（`qml6` に
+`*Section` を並べた使い捨てのウィンドウを書き、`import "file:///.../contents/ui"` で読む）。
+パネルに出さずに済むぶん、警報が出ていない日でも警報の枠を見られる。
 
 ## 設定項目を足すとき
 

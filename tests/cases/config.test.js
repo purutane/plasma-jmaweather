@@ -54,17 +54,31 @@ test("設定項目が main.xml と設定画面で揃っている", () => {
     eq(declared.length, ENTRIES.length, "設定項目の件数");
 });
 
-test("main.qml が読む設定はすべて定義済み", () => {
-    const used = new Set(
-        [...MAIN_QML.matchAll(/Plasmoid\.configuration\.(\w+)/g)].map((m) => m[1])
-    );
-    ok(used.size > 0, "main.qml から設定の参照を読めない");
-    for (const name of used) {
+test("QML が読む設定はすべて定義済み", () => {
+    // 表示を部品に切り出したので main.qml だけ見ていては足りない。
+    // 設定は root（main.qml）が読んで部品にはプロパティで渡す約束なので、
+    // 部品が直に読んでいたらそこも見つける。
+    const dir = path.join(h.ROOT, "contents", "ui");
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith(".qml"));
+    let total = 0;
+    for (const file of files) {
+        const used = new Set(
+            [...read("contents", "ui", file).matchAll(/Plasmoid\.configuration\.(\w+)/g)]
+                .map((m) => m[1])
+        );
+        total += used.size;
+        for (const name of used) {
+            ok(
+                ENTRIES.some((e) => e.name === name),
+                `${file} が読んでいる ${name} が main.xml に無い（黙って undefined になる）`
+            );
+        }
         ok(
-            ENTRIES.some((e) => e.name === name),
-            `main.qml が読んでいる ${name} が main.xml に無い（黙って undefined になる）`
+            file === "main.qml" || used.size === 0,
+            `${file} が設定を直に読んでいる（root から渡す。${[...used].join(", ")}）`
         );
     }
+    ok(total > 0, "QML から設定の参照を読めない");
 });
 
 test("パネル表示の選択肢が定義と設定画面と実装で揃っている", () => {

@@ -403,68 +403,13 @@ PlasmoidItem {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 26
         Layout.preferredHeight: Kirigami.Units.gridUnit * 30
 
-        header: PlasmaExtras.PlasmoidHeading {
-            // PlasmoidHeading は左右の余白を持たないので自分で足す。右はツールボタンが
-            // 自前の余白を持っているぶん狭くしないと右だけ広く見える。
-            leftPadding: Kirigami.Units.largeSpacing
-            rightPadding: Kirigami.Units.smallSpacing
-
-            // contentItem に入れる（子として置くと高さが背景の 40px 固定になり、
-            // 判定失敗の行が出たときにヘッダーからはみ出す）
-            contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
-
-                ColumnLayout {
-                    spacing: 0
-                    Layout.fillWidth: true
-
-                    PlasmaExtras.Heading {
-                        level: 4
-                        text: root.areaName
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-
-                    PlasmaComponents.Label {
-                        text: root.parsed
-                            ? Forecast.formatReportTime(root.parsed.reportTime)
-                            : ""
-                        font: Kirigami.Theme.smallFont
-                        opacity: 0.7
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-
-                    // 自動判定に失敗すると設定の地域が出る。黙って別の土地を出さない。
-                    PlasmaComponents.Label {
-                        visible: root.autoLocation && !root.usingDetected && root.locateError !== ""
-                        text: root.locateError + "（設定の地域を表示中）"
-                        font: Kirigami.Theme.smallFont
-                        color: Kirigami.Theme.neutralTextColor
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                }
-
-                PlasmaComponents.BusyIndicator {
-                    running: root.busy
-                    visible: root.busy
-                    implicitWidth: Kirigami.Units.iconSizes.small
-                    implicitHeight: Kirigami.Units.iconSizes.small
-                }
-
-                PlasmaComponents.ToolButton {
-                    icon.name: "view-refresh"
-                    display: PlasmaComponents.AbstractButton.IconOnly
-                    text: "更新"
-                    enabled: !root.busy
-                    onClicked: root.reload()
-
-                    PlasmaComponents.ToolTip.text: text
-                    PlasmaComponents.ToolTip.visible: hovered
-                    PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
-                }
-            }
+        header: ForecastHeader {
+            areaName: root.areaName
+            reportTime: root.parsed ? Forecast.formatReportTime(root.parsed.reportTime) : ""
+            // 判定に失敗して設定の地域を出しているときだけ知らせる
+            locateError: root.autoLocation && !root.usingDetected ? root.locateError : ""
+            busy: root.busy
+            onReloadRequested: root.reload()
         }
 
         // Representation は Page なので、中身は単一の子にまとめてヘッダーの下に置かせる
@@ -493,275 +438,41 @@ PlasmoidItem {
                     width: scroll.availableWidth - Kirigami.Units.largeSpacing * 2
                     spacing: Kirigami.Units.largeSpacing
 
-                    // ---- 警報・注意報 ----
-                    // 見出しの文（headlineText）は予報区全体に対するもので、他の地域の
-                    // 話が混ざる。主役は地域別の警報名にして、そちらは添え物として出す。
-                    ColumnLayout {
+                    WarningSection {
                         Layout.fillWidth: true
                         Layout.topMargin: Kirigami.Units.largeSpacing
-                        spacing: Kirigami.Units.smallSpacing
                         visible: root.showWarningBlock
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-                            visible: root.hasWarning
-
-                            Kirigami.Icon {
-                                source: "dialog-warning"
-                                implicitWidth: Kirigami.Units.iconSizes.small
-                                implicitHeight: Kirigami.Units.iconSizes.small
-                                Layout.alignment: Qt.AlignTop
-                            }
-
-                            PlasmaComponents.Label {
-                                text: Warning.warningNames(root.warning)
-                                color: Kirigami.Theme.negativeTextColor
-                                font.bold: true
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-
-                        PlasmaComponents.Label {
-                            visible: text !== ""
-                            text: Warning.advisoryNames(root.warning)
-                            color: Kirigami.Theme.neutralTextColor
-                            wrapMode: Text.WordWrap
-                            font: Kirigami.Theme.smallFont
-                            Layout.fillWidth: true
-                        }
-
-                        PlasmaComponents.Label {
-                            visible: root.hasAnyWarning && text !== ""
-                            text: root.warning ? root.warning.headline : ""
-                            wrapMode: Text.WordWrap
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.7
-                            Layout.fillWidth: true
-                        }
-
-                        // 何も出ていないことも情報。黙って空白にすると、
-                        // 警報を見ているのかどうかが利用者に分からない。
-                        PlasmaComponents.Label {
-                            visible: !root.hasAnyWarning && root.warningError === ""
-                            text: "発表中の警報・注意報はありません"
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.6
-                            Layout.fillWidth: true
-                        }
-
-                        PlasmaComponents.Label {
-                            visible: root.warningError !== ""
-                            text: root.warningError
-                            color: Kirigami.Theme.neutralTextColor
-                            font: Kirigami.Theme.smallFont
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
+                        warning: root.warning
+                        errorText: root.warningError
                     }
 
-                    // ---- 今日 ----
-                    RowLayout {
+                    TodaySection {
                         Layout.fillWidth: true
+                        // 警報の枠が出ているならその余白で足りる
                         Layout.topMargin: root.showWarningBlock
                             ? 0
                             : Kirigami.Units.largeSpacing
-                        spacing: Kirigami.Units.largeSpacing
-
-                        Kirigami.Icon {
-                            source: root.currentIcon
-                            implicitWidth: Kirigami.Units.iconSizes.huge
-                            implicitHeight: Kirigami.Units.iconSizes.huge
-                            Layout.alignment: Qt.AlignTop
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-
-                            PlasmaExtras.Heading {
-                                level: 3
-                                text: root.hasData
-                                    ? Forecast.dayLabel(root.today.date) + "　" + (root.today.label || "")
-                                    : ""
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-
-                            RowLayout {
-                                spacing: Kirigami.Units.largeSpacing
-
-                                PlasmaComponents.Label {
-                                    text: root.hasData ? Forecast.tempText(root.today.tmax) : "–"
-                                    color: Kirigami.Theme.negativeTextColor
-                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.6
-                                }
-
-                                PlasmaComponents.Label {
-                                    text: root.hasData ? Forecast.tempText(root.today.tmin) : "–"
-                                    color: Kirigami.Theme.linkColor
-                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.6
-                                }
-
-                                RowLayout {
-                                    spacing: Kirigami.Units.smallSpacing
-                                    Kirigami.Icon {
-                                        source: "weather-showers-symbolic"
-                                        implicitWidth: Kirigami.Units.iconSizes.small
-                                        implicitHeight: Kirigami.Units.iconSizes.small
-                                    }
-                                    PlasmaComponents.Label {
-                                        text: root.hasData ? Forecast.popText(root.today.pop) : "–"
-                                    }
-                                }
-                            }
-
-                            PlasmaComponents.Label {
-                                visible: text !== ""
-                                text: root.hasData ? Forecast.cleanText(root.today.text) : ""
-                                wrapMode: Text.WordWrap
-                                opacity: 0.9
-                                Layout.fillWidth: true
-                            }
-
-                            PlasmaComponents.Label {
-                                visible: text !== ""
-                                text: root.hasData && root.today.wind
-                                    ? "風: " + Forecast.cleanText(root.today.wind)
-                                    : ""
-                                wrapMode: Text.WordWrap
-                                font: Kirigami.Theme.smallFont
-                                opacity: 0.7
-                                Layout.fillWidth: true
-                            }
-                        }
+                        day: root.today
+                        iconName: root.currentIcon
                     }
 
-                    // ---- 今日これからの降水確率 ----
-                    ColumnLayout {
+                    PopSection {
                         Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        visible: popRepeater.count > 0
-
-                        PlasmaComponents.Label {
-                            text: "これからの降水確率"
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.7
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-
-                            Repeater {
-                                id: popRepeater
-                                model: root.parsed ? Forecast.remainingPops(root.parsed).slice(0, 4) : []
-
-                                delegate: ColumnLayout {
-                                    required property var modelData
-                                    spacing: 0
-                                    Layout.fillWidth: true
-
-                                    PlasmaComponents.Label {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        text: modelData.hour + "時"
-                                        font: Kirigami.Theme.smallFont
-                                        opacity: 0.7
-                                    }
-                                    PlasmaComponents.Label {
-                                        Layout.alignment: Qt.AlignHCenter
-                                        text: modelData.value + "%"
-                                        font.bold: modelData.value >= 50
-                                    }
-                                }
-                            }
-                        }
+                        // 5 枠以上あっても横に並べきれないので頭から 4 枠だけ
+                        pops: root.parsed ? Forecast.remainingPops(root.parsed).slice(0, 4) : []
                     }
 
                     Kirigami.Separator { Layout.fillWidth: true }
 
-                    // ---- 週間予報 ----
-                    ColumnLayout {
+                    WeekSection {
                         Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-
-                        Repeater {
-                            model: root.parsed
-                                ? root.parsed.order.filter(function (d) {
-                                      return root.today && d > root.today.date;
-                                  })
-                                : []
-
-                            delegate: RowLayout {
-                                required property var modelData
-                                readonly property var day: root.parsed.days[modelData]
-
-                                Layout.fillWidth: true
-                                spacing: Kirigami.Units.smallSpacing
-
-                                PlasmaComponents.Label {
-                                    text: Forecast.shortDate(day.date)
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                                }
-
-                                Kirigami.Icon {
-                                    source: day.code ? Telops.icon(day.code, false) : "weather-none-available"
-                                    implicitWidth: Kirigami.Units.iconSizes.smallMedium
-                                    implicitHeight: Kirigami.Units.iconSizes.smallMedium
-                                }
-
-                                PlasmaComponents.Label {
-                                    text: day.label || "–"
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-
-                                PlasmaComponents.Label {
-                                    text: Forecast.popText(day.pop)
-                                    horizontalAlignment: Text.AlignRight
-                                    opacity: 0.8
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2.5
-                                }
-
-                                PlasmaComponents.Label {
-                                    text: Forecast.tempText(day.tmax)
-                                    color: Kirigami.Theme.negativeTextColor
-                                    horizontalAlignment: Text.AlignRight
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-                                }
-
-                                PlasmaComponents.Label {
-                                    text: Forecast.tempText(day.tmin)
-                                    color: Kirigami.Theme.linkColor
-                                    horizontalAlignment: Text.AlignRight
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 2
-                                }
-                            }
-                        }
+                        parsed: root.parsed
+                        today: root.today
                     }
 
-                    // ---- 概況 ----
-                    ColumnLayout {
+                    OverviewSection {
                         Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        visible: root.overview !== ""
-
-                        Kirigami.Separator { Layout.fillWidth: true }
-
-                        PlasmaComponents.Label {
-                            text: "概況"
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.7
-                        }
-
-                        PlasmaComponents.Label {
-                            text: root.overview
-                            wrapMode: Text.WordWrap
-                            font: Kirigami.Theme.smallFont
-                            opacity: 0.9
-                            Layout.fillWidth: true
-                        }
+                        overview: root.overview
                     }
 
                     // 末尾の余白。概況が空でも下端に文字が張り付かないよう独立させてある
