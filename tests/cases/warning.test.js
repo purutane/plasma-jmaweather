@@ -134,13 +134,6 @@ test("深刻な順に並べる", () => {
     eq(W.summary(parsed), "大雨特別警報・暴風警報・大雨注意報・雷注意報", "全部のまとめ");
 });
 
-test("レベルの呼び名", () => {
-    eq(W.levelLabel(C.EMERGENCY), "特別警報");
-    eq(W.levelLabel(C.CRITICAL), "危険警報");
-    eq(W.levelLabel(C.WARNING), "警報");
-    eq(W.levelLabel(C.ADVISORY), "注意報");
-});
-
 test("見出しは一番重い電文のものを使う", () => {
     // 大雨・土砂災害・雷はそれぞれ別の電文で届き、電文ごとに違う見出しが付く。
     // 全部並べると同じ話が何度も出るので、一番重いものを伝えている文だけ出す。

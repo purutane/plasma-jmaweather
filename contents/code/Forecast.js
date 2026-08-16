@@ -80,8 +80,7 @@ function emptyDay(date) {
         tmin: null,
         tmax: null,
         // 今日の最低気温を前日の配信から持ち越したか（表示で区別するため）
-        tminCarried: false,
-        reliability: null
+        tminCarried: false
     };
 }
 
@@ -179,10 +178,6 @@ function parse(json, areaCode) {
             var wp = blankToNull(wwa.pops ? wwa.pops[m] : null);
             if (wp !== null && wd.pop === null) {
                 wd.pop = parseInt(wp, 10);
-            }
-            var wr = blankToNull(wwa.reliabilities ? wwa.reliabilities[m] : null);
-            if (wr !== null) {
-                wd.reliability = wr;
             }
         }
 

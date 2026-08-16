@@ -124,16 +124,3 @@ function advisoryNames(parsed) {
 function summary(parsed) {
     return names(parsed, 0);
 }
-
-function levelLabel(level) {
-    if (level >= WarnCodes.EMERGENCY) {
-        return "特別警報";
-    }
-    if (level >= WarnCodes.CRITICAL) {
-        return "危険警報";
-    }
-    if (level >= WarnCodes.WARNING) {
-        return "警報";
-    }
-    return "注意報";
-}
