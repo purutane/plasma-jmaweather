@@ -154,3 +154,33 @@ test("問い合わせ先は HTTPS で固定されている", () => {
     }
     h.note(locate.PROVIDERS.map((p) => p.name).join(" → "));
 });
+
+// ---- 実際に使う区域 ----
+// パネルと設定画面が別々に判断していたときは、片方だけ直すと違う地域を指した。
+
+test("自動判定が効いていればその区域を使う", () => {
+    const a = locate.effectiveArea(true, "270000", "270000", "130000", "130010");
+    eq(a.officeCode, "270000", "予報区");
+    eq(a.areaCode, "270000", "地域");
+    eq(a.detected, true, "判定を使っている");
+});
+
+test("手動指定のときは判定結果があっても使わない", () => {
+    const a = locate.effectiveArea(false, "270000", "270000", "130000", "130010");
+    eq(a.officeCode, "130000", "予報区");
+    eq(a.areaCode, "130010", "地域");
+    eq(a.detected, false, "判定を使っていない");
+});
+
+test("判定結果が実在しなければ設定の地域に落とす", () => {
+    // 区域が再編されて設定に残ったコードが一覧から消えている場合。
+    // 黙って空の予報を出さず、手動指定（既定は東京地方）へ落ちる。
+    ok(!locate.hasDetected("999999", "999999"), "実在しないコードを実在と見ている");
+    const a = locate.effectiveArea(true, "999999", "999999", "130000", "130010");
+    eq(a.officeCode, "130000", "予報区");
+    eq(a.areaCode, "130010", "地域");
+    eq(a.detected, false, "判定は効いていない");
+
+    // 判定前（空）も同じ扱い
+    eq(locate.effectiveArea(true, "", "", "130000", "130010").detected, false, "判定前");
+});

@@ -72,7 +72,9 @@ function loadGeo() {
 }
 
 function loadLocate() {
-    return instantiate(path.join(CODE_DIR, "Locate.js"));
+    return instantiate(path.join(CODE_DIR, "Locate.js"), {
+        Areas: loadAreas()
+    });
 }
 
 function loadWarnCodes() {

@@ -5,6 +5,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils as KCM
 
 import "../code/Areas.js" as Areas
+import "../code/Locate.js" as Locate
 
 // 設定ページの余白（上下左右）は SimpleKCM が持っている。
 // FormLayout を直に根へ置くと、先頭の行がタイトルバーに貼り付く。
@@ -28,15 +29,18 @@ KCM.SimpleKCM {
     property bool cfg_showWarnings
 
     readonly property bool autoMode: page.cfg_locationMode === 0
+    readonly property bool hasDetected: Locate.hasDetected(page.cfg_detectedOfficeCode,
+                                                           page.cfg_detectedAreaCode)
     // 自動判定中はコンボに判定結果を映す。手動へ切り替えたときの出発点にもなる。
-    readonly property bool hasDetected: Areas.areaIndex(page.cfg_detectedOfficeCode,
-                                                        page.cfg_detectedAreaCode) >= 0
-    readonly property string shownOfficeCode: page.autoMode && page.hasDetected
-        ? page.cfg_detectedOfficeCode
-        : page.cfg_officeCode
-    readonly property string shownAreaCode: page.autoMode && page.hasDetected
-        ? page.cfg_detectedAreaCode
-        : page.cfg_areaCode
+    // どちらを採るかの判断は main.qml と同じものを使う（別々に書くとずれる）。
+    readonly property var shownArea: Locate.effectiveArea(
+        page.autoMode,
+        page.cfg_detectedOfficeCode,
+        page.cfg_detectedAreaCode,
+        page.cfg_officeCode,
+        page.cfg_areaCode)
+    readonly property string shownOfficeCode: page.shownArea.officeCode
+    readonly property string shownAreaCode: page.shownArea.areaCode
 
     property string locateError: ""
 

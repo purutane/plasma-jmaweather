@@ -9,23 +9,26 @@ import org.kde.kirigami as Kirigami
 import "../code/Forecast.js" as Forecast
 import "../code/Telops.js" as Telops
 import "../code/Areas.js" as Areas
+import "../code/Locate.js" as Locate
 import "../code/Warning.js" as Warning
 
 PlasmoidItem {
     id: root
 
     readonly property bool autoLocation: Plasmoid.configuration.locationMode === 0
-    // 判定結果は設定に残してあるが、区域が再編されて消えていることもあるので実在を確かめる
-    readonly property bool usingDetected: autoLocation
-        && Areas.areaIndex(Plasmoid.configuration.detectedOfficeCode,
-                           Plasmoid.configuration.detectedAreaCode) >= 0
 
-    readonly property string officeCode: usingDetected
-        ? Plasmoid.configuration.detectedOfficeCode
-        : Plasmoid.configuration.officeCode
-    readonly property string areaCode: usingDetected
-        ? Plasmoid.configuration.detectedAreaCode
-        : Plasmoid.configuration.areaCode
+    // 自動判定と手動指定のどちらを使うかは設定画面と同じ判断でなければならないので、
+    // Locate.effectiveArea() に寄せてある（別々に書くと片方だけ直したときにずれる）
+    readonly property var activeArea: Locate.effectiveArea(
+        autoLocation,
+        Plasmoid.configuration.detectedOfficeCode,
+        Plasmoid.configuration.detectedAreaCode,
+        Plasmoid.configuration.officeCode,
+        Plasmoid.configuration.areaCode)
+
+    readonly property bool usingDetected: activeArea.detected
+    readonly property string officeCode: activeArea.officeCode
+    readonly property string areaCode: activeArea.areaCode
     // 保存済みの名前ではなくコードから毎回組み立てる（選び直さなくても表記が揃う）
     readonly property string areaName: {
         var n = Areas.displayName(officeCode, areaCode);

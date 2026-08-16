@@ -1,6 +1,8 @@
 .pragma library
+.import "Areas.js" as Areas
 
 // IP アドレスから現在地の一次細分区域を割り出す。
+// あわせて「自動判定と手動指定のどちらを使うか」もここで決める（末尾）。
 //
 // 気象庁は位置情報を配信していないので、座標を得るところだけ外部サービスに頼る。
 // ここが唯一 jma.go.jp 以外と通信する箇所なので、判定は 1 日 1 回に抑え、
@@ -74,4 +76,28 @@ function resolve(location, points) {
         return null;
     }
     return nearestArea(location.lat, location.lon, points);
+}
+
+// ---- 実際に使う区域 ----
+//
+// 自動判定と手動指定のどちらを採るかは、パネル（main.qml）と設定画面
+// （ConfigGeneral.qml）の両方が要る。別々に書くと片方だけ直したときに
+// パネルと設定画面が違う地域を指すので、判断はここ 1 箇所に置く。
+
+// 判定結果は設定に残るが、区域が再編されて消えていることもあるので実在を確かめる。
+// 実在しなければ「まだ判定していない」のと同じ扱いにする。
+function hasDetected(officeCode, areaCode) {
+    return Areas.areaIndex(officeCode, areaCode) >= 0;
+}
+
+// auto は locationMode が自動かどうか。0 番＝自動という対応は呼ぶ側が持つ
+// （main.xml の <choice> の並びと突き合わせているのは config.test.js）。
+function effectiveArea(auto, detectedOffice, detectedArea, office, area) {
+    var detected = !!auto && hasDetected(detectedOffice, detectedArea);
+    return {
+        officeCode: detected ? detectedOffice : office,
+        areaCode: detected ? detectedArea : area,
+        // 自動判定が実際に効いているか（外れたことを表示に出すために要る）
+        detected: detected
+    };
 }

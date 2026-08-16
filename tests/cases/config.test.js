@@ -154,6 +154,21 @@ test("地域の決め方が定義と設定画面と実装で揃っている", ()
     eq(defaultOf("locationMode"), "0", "既定は自動判定");
 });
 
+test("使う地域の決め方をパネルと設定画面で共有している", () => {
+    // 自動判定と手動指定のどちらを採るかを両方に書くと、片方だけ直したときに
+    // パネルと設定画面が違う地域を指す。判断は Locate.effectiveArea() だけに置く。
+    for (const [name, src] of [["main.qml", MAIN_QML], ["ConfigGeneral.qml", CONFIG_QML]]) {
+        ok(
+            /Locate\.effectiveArea\(/.test(src),
+            `${name} が Locate.effectiveArea() を通していない`
+        );
+        ok(
+            !/Areas\.areaIndex\([^)]*detected/i.test(src),
+            `${name} が判定結果の実在確認を自前で書いている（Locate.hasDetected() を使う）`
+        );
+    }
+});
+
 test("1.0 からの移行判定が既定値と同じ地域を見ている", () => {
     // 「既定のまま使っていた人」だけを自動判定へ移す。main.xml の既定値を変えたら
     // main.qml のここも変えないと、設定済みの人まで自動へ動いてしまう。
